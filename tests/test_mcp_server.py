@@ -32,6 +32,62 @@ from great_docs.mcp import (
     read_resource,
 )
 
+
+def test_tool_schemas_accept_config_selection() -> None:
+    for tool in asyncio.run(list_tools()):
+        assert "config_path" in tool.model_dump(by_alias=True)["inputSchema"]["properties"], (
+            tool.name
+        )
+
+
+def test_config_and_page_handlers_use_selected_source(tmp_path: Path) -> None:
+    source = tmp_path / "website"
+    source.mkdir()
+    config = source / "settings.yml"
+    config.write_text("name: selected-project\n")
+    arguments = {"project_path": str(tmp_path), "config_path": str(config)}
+    result = asyncio.run(_handle_config(arguments))
+    assert "selected-project" in result[0].text
+    result = asyncio.run(_handle_add_page({**arguments, "title": "Welcome"}))
+    assert (source / "user_guide/welcome.qmd").is_file()
+
+
+def test_status_reports_selected_build(tmp_path: Path) -> None:
+    source = tmp_path / "website"
+    (source / "_quarto/default").mkdir(parents=True)
+    config = source / "settings.yml"
+    config.write_text("{}\n")
+    result = asyncio.run(
+        _handle_status({"project_path": str(tmp_path), "config_path": str(config)})
+    )
+    assert "website/settings.yml" in result[0].text
+    assert "default" in result[0].text
+
+
+def test_page_completion_uses_selected_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from mcp.types import CompletionArgument, ResourceTemplateReference
+
+    (tmp_path / "website").mkdir()
+    config = tmp_path / "website/settings.yml"
+    config.write_text("{}\n")
+    (tmp_path / "website/guide.qmd").write_text("Guide\n")
+    (tmp_path / "unrelated.qmd").write_text("Unrelated\n")
+    monkeypatch.chdir(tmp_path)
+    context = SimpleNamespace(arguments={"project_path": str(tmp_path), "config_path": str(config)})
+    result = asyncio.run(
+        handle_completion(
+            ResourceTemplateReference(type="ref/resource", uri="gd://page/{path}"),
+            CompletionArgument(name="path", value=""),
+            context,
+        )
+    )
+    assert result.values == ["website/guide.qmd"]
+
+
 # ---------------------------------------------------------------------------
 # _get_project_root
 # ---------------------------------------------------------------------------

@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 from great_docs.cli import (
@@ -19,6 +20,317 @@ from great_docs.cli import (
     _print_timing_table,
     cli,
 )
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "build",
+        "preview",
+        "uninstall",
+        "scan",
+        "freeze",
+        "timings",
+        "setup-github-pages",
+        "check-links",
+        "changelog",
+        "proofread",
+        "seo",
+        "lint",
+        "versions",
+    ],
+)
+def test_project_commands_reject_missing_selected_config(tmp_path: Path, command: str) -> None:
+    result = CliRunner().invoke(
+        cli, [command, "--project-path", str(tmp_path), "--config", str(tmp_path / "missing.yml")]
+    )
+    assert result.exit_code != 0
+    assert "Configuration file does not exist" in result.output
+
+
+@pytest.mark.parametrize("command", ["init", "config"])
+@pytest.mark.parametrize("selection", [None, "website/settings.yml"])
+def test_creation_selects_docs_or_custom_config(
+    tmp_path: Path, command: str, selection: str | None
+) -> None:
+    args = [command, "--project-path", str(tmp_path), "--force"]
+    if selection:
+        args += ["--config", str(tmp_path / selection)]
+    result = CliRunner().invoke(cli, args)
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / (selection or "docs/great-docs.yml")).is_file()
+    assert not (tmp_path / "great-docs.yml").exists()
+
+
+def test_creation_refuses_second_conventional_config(tmp_path: Path) -> None:
+    (tmp_path / "great-docs.yml").write_text("name: existing\n")
+    result = CliRunner().invoke(
+        cli,
+        [
+            "config",
+            "--project-path",
+            str(tmp_path),
+            "--config",
+            str(tmp_path / "docs/great-docs.yml"),
+            "--force",
+        ],
+    )
+    assert result.exit_code != 0
+    assert not (tmp_path / "docs/great-docs.yml").exists()
+
+
+def test_timings_reads_selected_deployment(tmp_path: Path) -> None:
+    (tmp_path / "website/_site").mkdir(parents=True)
+    (tmp_path / "website/settings.yml").write_text("{}\n")
+    (tmp_path / "website/_site/build-timings.json").write_text('{"pages": []}')
+    result = CliRunner().invoke(
+        cli,
+        [
+            "timings",
+            "--project-path",
+            str(tmp_path),
+            "--config",
+            str(tmp_path / "website/settings.yml"),
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == {"pages": []}
+
+
+def test_versions_reads_selected_config(tmp_path: Path) -> None:
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs/great-docs.yml").write_text("versions:\n  - tag: dev\n    latest: true\n")
+    result = CliRunner().invoke(cli, ["versions", "--project-path", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    assert "dev" in result.output
+    assert "No versions" not in result.output
+
+
+@pytest.mark.parametrize("selection", [None, "website/settings.yml"])
+def test_remote_build_uses_checkout_layout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selection: str | None
+) -> None:
+    from great_docs import GreatDocs
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    source = "website" if selection else "docs"
+    (repo / source).mkdir()
+    (repo / (selection or "docs/great-docs.yml")).write_text("{}\n")
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.org",
+            "commit",
+            "-m",
+            "Initial configuration",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    monkeypatch.chdir(destination)
+    run = subprocess.run
+
+    def run_build(command: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        if command[0] == "git":
+            return run(command, **kwargs)
+        if "build" in command:
+            checkout = Path(command[command.index("--project-path") + 1])
+            if selection:
+                assert (
+                    Path(command[command.index("--config") + 1]) == (checkout / selection).resolve()
+                )
+            site = checkout / source / "_site"
+            site.mkdir()
+            (site / "index.html").write_text("remote documentation")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", run_build)
+    monkeypatch.setattr("venv.create", lambda *args, **kwargs: None)
+    built = GreatDocs.build_from_repo(str(repo), config_path=selection, shallow=True)
+    assert built == destination / source / "_site"
+    assert (built / "index.html").read_text() == "remote documentation"
+
+
+@pytest.mark.parametrize("selection", ["../outside.yml", "/tmp/outside.yml"])
+def test_remote_config_cannot_escape_checkout(tmp_path: Path, selection: str) -> None:
+    from great_docs import GreatDocs
+    from great_docs._layout import LayoutError
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "great-docs.yml").write_text("{}\n")
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.org",
+            "commit",
+            "-m",
+            "Initial configuration",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    with pytest.raises(LayoutError, match="checkout"):
+        GreatDocs.build_from_repo(str(repo), config_path=selection, shallow=True)
+
+
+def test_config_generation_ignores_only_selected_output(tmp_path: Path) -> None:
+    result = CliRunner().invoke(cli, ["config", "--project-path", str(tmp_path), "--force"])
+    assert result.exit_code == 0, result.output
+    ignores = (tmp_path / ".gitignore").read_text()
+    assert "/docs/_quarto/" in ignores
+    assert "/docs/_site/" in ignores
+    assert "/great-docs/" not in ignores
+    assert "_freeze" not in ignores
+
+
+def test_freeze_info_reads_selected_sources_and_cache(tmp_path: Path) -> None:
+    (tmp_path / "website/user_guide").mkdir(parents=True)
+    (tmp_path / "website/settings.yml").write_text("freeze: auto\n")
+    (tmp_path / "website/user_guide/demo.qmd").write_text("---\nfreeze: true\n---\n")
+    result = CliRunner().invoke(
+        cli,
+        [
+            "freeze",
+            "--project-path",
+            str(tmp_path),
+            "--config",
+            str(tmp_path / "website/settings.yml"),
+            "--info",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "website/_freeze" in result.output
+    assert "demo.qmd" in result.output
+    assert "auto" in result.output
+
+
+def test_build_command_uses_selected_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from great_docs import GreatDocs
+
+    (tmp_path / "website").mkdir()
+    config = tmp_path / "website/settings.yml"
+    config.write_text("name: selected\n")
+
+    def build_selected(docs: GreatDocs, **kwargs: object) -> None:
+        docs.build_dir.mkdir(parents=True)
+        (docs.build_dir / "selection.txt").write_text(docs._config["name"])
+
+    monkeypatch.setattr(GreatDocs, "build", build_selected)
+    result = CliRunner().invoke(
+        cli, ["build", "--project-path", str(tmp_path), "--config", str(config)]
+    )
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "website/_quarto/default/selection.txt").read_text() == "selected"
+
+
+def test_preview_serves_selected_deployment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import http.server
+
+    (tmp_path / "website/_site").mkdir(parents=True)
+    config = tmp_path / "website/settings.yml"
+    config.write_text("{}\n")
+    (tmp_path / "website/_site/index.html").write_text("preview documentation")
+    served: list[str] = []
+
+    def server(address: object, handler: object) -> MagicMock:
+        served.append(Path(handler.keywords["directory"]).joinpath("index.html").read_text())
+        return MagicMock()
+
+    monkeypatch.setattr(http.server, "ThreadingHTTPServer", server)
+    monkeypatch.setattr("threading.Timer", MagicMock())
+    result = CliRunner().invoke(
+        cli, ["preview", "--project-path", str(tmp_path), "--config", str(config)]
+    )
+    assert result.exit_code == 0, result.output
+    assert served == ["preview documentation"]
+
+
+def test_preview_override_ignores_ambiguous_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from great_docs import GreatDocs
+
+    (tmp_path / "great-docs.yml").write_text("{}\n")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs/great-docs.yml").write_text("{}\n")
+    site = tmp_path / "published"
+    site.mkdir()
+    (site / "index.html").write_text("published documentation")
+    monkeypatch.setattr(
+        GreatDocs,
+        "preview_site",
+        lambda path, **kwargs: print(Path(path).joinpath("index.html").read_text()),
+    )
+    result = CliRunner().invoke(
+        cli, ["preview", "--project-path", str(tmp_path), "--site-dir", str(site)]
+    )
+    assert result.exit_code == 0, result.output
+    assert "published documentation" in result.output
+
+
+def test_uninstall_removes_only_selected_project(tmp_path: Path) -> None:
+    from great_docs import GreatDocs
+    from great_docs._utils import QUARTO_YML_HEADER
+
+    (tmp_path / "great-docs.yml").write_text("name: preserved\n")
+    (tmp_path / "website").mkdir()
+    config = tmp_path / "website/settings.yml"
+    config.write_text("{}\n")
+    docs = GreatDocs(str(tmp_path), config_path=str(config))
+    docs.build_dir.mkdir(parents=True)
+    (docs.build_dir / "_quarto.yml").write_text(QUARTO_YML_HEADER)
+    result = CliRunner().invoke(
+        cli, ["uninstall", "--project-path", str(tmp_path), "--config", str(config)]
+    )
+    assert result.exit_code == 0, result.output
+    assert not config.exists()
+    assert not (tmp_path / "website/_quarto").exists()
+    assert (tmp_path / "great-docs.yml").read_text() == "name: preserved\n"
+
+
+@pytest.mark.parametrize(
+    "selected", ["great-docs.yml", "docs/great-docs.yml", "website/settings.yml"]
+)
+def test_workflow_uses_selected_deployment(tmp_path: Path, selected: str) -> None:
+    config = tmp_path / selected
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text("{}\n")
+    result = CliRunner().invoke(
+        cli,
+        ["setup-github-pages", "--project-path", str(tmp_path), "--config", str(config), "--force"],
+    )
+    assert result.exit_code == 0, result.output
+    workflow = (tmp_path / ".github/workflows/docs.yml").read_text()
+    expected_site = (
+        "great-docs/_site"
+        if selected == "great-docs.yml"
+        else selected.rsplit("/", 1)[0] + "/_site"
+    )
+    assert f"--config {selected}" in workflow
+    assert f"path: {expected_site}" in workflow
 
 
 def test_detect_python_version_ge():

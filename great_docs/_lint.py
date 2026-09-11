@@ -76,9 +76,11 @@ def run_lint(
     project_root: Path,
     checks: set[str] | None = None,
     quiet: bool = False,
+    *,
+    config_path: str | None = None,
 ) -> LintResult:
     """
-    Run documentation lint checks on a package.
+    Run documentation lint checks on a package
 
     Parameters
     ----------
@@ -89,6 +91,8 @@ def run_lint(
         Valid names: "docstrings", "cross-refs", "style", "directives".
     quiet
         If True, suppress discovery/introspection print output.
+    config_path
+        Configuration file, resolved from the current working directory.
 
     Returns
     -------
@@ -125,7 +129,7 @@ def run_lint(
         sys.stdout = io.StringIO()
 
     try:
-        docs = GreatDocs(project_path=str(project_root))
+        docs = GreatDocs(project_path=str(project_root), config_path=config_path)
         package_name = docs._detect_package_name()
     except Exception:
         if quiet:

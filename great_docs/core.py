@@ -12,7 +12,7 @@ from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 from yaml12 import format_yaml, parse_yaml, read_yaml, write_yaml
 
-from ._layout import Layout
+from ._layout import Layout, LayoutError
 from ._source_refs import source_reference_spans
 from ._subprocess import TEXT_MODE_KWARGS
 from ._typer_cli import is_cli_command, is_cli_group, param_kind, to_click_command
@@ -197,7 +197,13 @@ class GreatDocs:
     default, so new functions and classes are picked up automatically.
     """
 
-    def __init__(self, project_path: str | None = None, *, config_path: str | None = None) -> None:
+    def __init__(
+        self,
+        project_path: str | None = None,
+        *,
+        config_path: str | None = None,
+        create: bool = False,
+    ) -> None:
         """
         Initialise a documentation project from its package and configuration
 
@@ -207,10 +213,15 @@ class GreatDocs:
             Path to the project root directory. Defaults to current directory.
         config_path
             Configuration file, resolved from the current working directory.
+        create
+            Permit a missing configuration for initialisation without creating files.
         """
         self.layout = Layout.make(
-            Path(project_path or os.getcwd()), Path(config_path) if config_path else None
+            Path(project_path or os.getcwd()),
+            Path(config_path) if config_path else None,
+            create=create,
         )
+        self._selected_config_path = Path(config_path).resolve() if config_path else None
         self.project_root = self.layout.package_root
         self.build_dir = self.layout.build_dir
         try:
@@ -881,6 +892,9 @@ class GreatDocs:
         """
         print("Initializing great-docs...")
 
+        self.layout = Layout.make(self.project_root, self._selected_config_path, create=True)
+        self.build_dir = self.layout.build_dir
+
         # Generate great-docs.yml with discovered exports
         self._generate_initial_config(force=force)
 
@@ -913,6 +927,31 @@ class GreatDocs:
             If True, skip the prompt and automatically update .gitignore.
         """
         gitignore_path = self.project_root / ".gitignore"
+
+        if self.layout.source_dir != self.project_root:
+            source = self.layout.source_dir.relative_to(self.project_root).as_posix()
+            entries = [
+                f"/{source}/_quarto/",
+                f"/{source}/_site/",
+                "/.great-docs-build/",
+                "/.great-docs-cache/",
+                "/.great-docs/",
+            ]
+            content = gitignore_path.read_text(encoding="utf-8") if gitignore_path.exists() else ""
+            missing = [entry for entry in entries if not _gitignore_has_entry(content, entry)]
+            if missing and (
+                force
+                or input("Ignore Great Docs build output? [Y/n]: ").strip().lower()
+                in {"", "y", "yes"}
+            ):
+                gitignore_path.write_text(
+                    content.rstrip()
+                    + "\n\n# Great Docs build output\n"
+                    + "\n".join(missing)
+                    + "\n",
+                    encoding="utf-8",
+                )
+            return
 
         # Entry to add
         entry = "# Great Docs build directory (ephemeral, do not commit)\n/great-docs/\n"
@@ -9696,7 +9735,7 @@ class GreatDocs:
         bool
             True if config was created, False if skipped.
         """
-        config_path = self._find_package_root() / "great-docs.yml"
+        config_path = self.layout.config_path
 
         if config_path.exists() and not force:
             print(
@@ -9704,6 +9743,8 @@ class GreatDocs:
                 "Use --force to overwrite it (this will reset to defaults)."
             )
             return False
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Detect package name
         package_name = self._detect_package_name()
@@ -16986,13 +17027,14 @@ anchor-sections: true
         *,
         branch: str | None = None,
         output_dir: str | None = None,
+        config_path: str | None = None,
         refresh: bool = True,
         version_tags: list[str] | None = None,
         latest_only: bool = False,
         shallow: bool = False,
     ) -> Path:
         """
-        Clone a remote repository and build its documentation site.
+        Clone a remote repository and build its documentation site
 
         This is a convenience method for building documentation from a separate repository. It
         handles cloning, creating a temporary virtual environment, installing the package, building
@@ -17016,8 +17058,11 @@ anchor-sections: true
         branch
             Branch, tag, or commit to check out. If `None`, uses the repository's default branch.
         output_dir
-            Directory to copy the built site into. If `None`, defaults to `./great-docs/_site` in
-            the current working directory.
+            Directory to copy the built site into. If omitted, use the checkout's
+            deployment path relative to the current working directory.
+        config_path
+            Configuration path relative to the checkout. Paths outside the checkout
+            are rejected.
         refresh
             If `True` (default), re-discover package exports before building.
         version_tags
@@ -17053,10 +17098,8 @@ anchor-sections: true
         import tempfile
         import venv
 
-        if output_dir is None:
-            output_path = Path.cwd() / "great-docs" / "_site"
-        else:
-            output_path = Path(output_dir).resolve()
+        if config_path is not None and Path(config_path).is_absolute():
+            raise LayoutError("Remote configuration must be a relative path inside the checkout")
 
         tmpdir = tempfile.mkdtemp(prefix="great-docs-remote-")
         clone_dir = Path(tmpdir) / "repo"
@@ -17075,9 +17118,21 @@ anchor-sections: true
                     f"git clone failed (exit {result.returncode}):\n{result.stderr.strip()}"
                 )
 
+            selected_config = (clone_dir / config_path).resolve() if config_path else None
+            if selected_config is not None and not selected_config.is_relative_to(
+                clone_dir.resolve()
+            ):
+                raise LayoutError("Remote configuration must remain inside the checkout")
+            layout = Layout.make(clone_dir, selected_config)
+            output_path = (
+                Path(output_dir).resolve()
+                if output_dir
+                else Path.cwd() / layout.site_dir.relative_to(clone_dir.resolve())
+            )
+
             # ── 1b. Inspect great-docs.yml and deepen history if needed ─
             if not shallow:
-                needs = cls._inspect_repo_git_needs(clone_dir)
+                needs = cls._inspect_repo_git_needs(clone_dir, config_path=layout.config_path)
                 if needs == "full":
                     print("   Fetching full history (versioned docs / page dates)...")
                     subprocess.run(
@@ -17162,6 +17217,8 @@ anchor-sections: true
                 gd_cli = venv_dir / "bin" / "great-docs"
 
             build_cmd = [str(gd_cli), "build", "--project-path", str(clone_dir)]
+            if config_path is not None:
+                build_cmd.extend(["--config", str(layout.config_path)])
             if not refresh:
                 build_cmd.append("--no-refresh")
             if version_tags:
@@ -17187,7 +17244,7 @@ anchor-sections: true
                 raise RuntimeError(f"great-docs build failed (exit {result.returncode})")
 
             # ── 6. Copy built site to output directory ─────────────────
-            site_dir = clone_dir / "great-docs" / "_site"
+            site_dir = layout.site_dir
             if not site_dir.exists():
                 raise RuntimeError(f"Build completed but _site/ directory not found at {site_dir}")
 
@@ -17333,8 +17390,9 @@ anchor-sections: true
         return ",".join(found)
 
     @staticmethod
-    def _inspect_repo_git_needs(clone_dir: Path) -> str:
-        """Inspect a cloned repo's `great-docs.yml` to determine git depth needs.
+    def _inspect_repo_git_needs(clone_dir: Path, *, config_path: Path | None = None) -> str:
+        """
+        Inspect the selected configuration to determine Git history requirements
 
         Returns one of three strings indicating how much git history is
         required for the features declared in the config:
@@ -17347,13 +17405,15 @@ anchor-sections: true
         ----------
         clone_dir
             Path to the cloned repository root.
+        config_path
+            Selected configuration file within the checkout.
 
         Returns
         -------
         str
             One of `"full"`, `"tags"`, or `"none"`.
         """
-        config_path = clone_dir / "great-docs.yml"
+        config_path = Layout.make(clone_dir, config_path).config_path
         if not config_path.exists():
             return "none"
 
@@ -17430,7 +17490,7 @@ anchor-sections: true
         print("Previewing documentation...")
 
         # Check if site has been built
-        site_path = self.build_dir / "_site"
+        site_path = self.layout.site_dir
         index_html = site_path / "index.html"
 
         if not index_html.exists():
