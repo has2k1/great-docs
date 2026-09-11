@@ -64,6 +64,29 @@ def test_status_reports_selected_build(tmp_path: Path) -> None:
     assert "default" in result[0].text
 
 
+def test_preview_command_quotes_paths(tmp_path: Path) -> None:
+    import shlex
+
+    root = tmp_path / "package with spaces"
+    (root / "website pages/_quarto/default").mkdir(parents=True)
+    config = root / "website pages/settings.yml"
+    config.write_text("{}\n")
+    result = asyncio.run(
+        _handle_preview({"project_path": str(root), "config_path": str(config), "port": 8080})
+    )
+    command = result[0].text.splitlines()[1].strip()
+    assert shlex.split(command) == [
+        "great-docs",
+        "preview",
+        "--project-path",
+        str(root),
+        "--config",
+        str(config),
+        "--port",
+        "8080",
+    ]
+
+
 def test_page_completion_uses_selected_context(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -822,6 +845,41 @@ class TestListResources:
 
 
 class TestReadResource:
+    @pytest.mark.parametrize("selection", ["website/settings.yml", "docs/great-docs.yml"])
+    @pytest.mark.parametrize(
+        "resource, expected",
+        [
+            ("config", "module: json"),
+            ("reference/dumps", "json.dumps"),
+            ("api-surface", "Package: json"),
+            ("status", "Configuration:"),
+            ("build-log", "default"),
+        ],
+    )
+    def test_resource_uses_explicit_config(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        selection: str,
+        resource: str,
+        expected: str,
+    ) -> None:
+        from urllib.parse import urlencode
+
+        (tmp_path / "pyproject.toml").write_text('[project]\nname = "resource-fixture"\n')
+        config = tmp_path / selection
+        config.parent.mkdir()
+        config.write_text("module: json\ndynamic: false\n")
+        (config.parent / "_quarto/default").mkdir(parents=True)
+        if selection.startswith("docs/"):
+            (tmp_path / "great-docs.yml").write_text("module: wrong_module\n")
+        monkeypatch.chdir(tmp_path)
+        query = urlencode({"config_path": selection})
+        result = asyncio.run(read_resource(AnyUrl(f"gd://{resource}?{query}")))
+        assert expected in result
+        if resource == "status":
+            assert selection in result
+
     def _uri(self, s: str) -> AnyUrl:
         return AnyUrl(s)
 
@@ -910,6 +968,24 @@ class TestReadResource:
 
 
 class TestListResourceTemplates:
+    def test_explicit_selection_is_discoverable_with_ambiguous_configs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "great-docs.yml").write_text("{}\n")
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs/great-docs.yml").write_text("{}\n")
+        monkeypatch.chdir(tmp_path)
+        assert asyncio.run(list_resources())
+        templates = asyncio.run(list_resource_templates())
+        for resource in ("config", "reference", "api-surface", "status", "build-log"):
+            assert any(
+                str(template.model_dump(by_alias=True)["uriTemplate"]).startswith(
+                    f"gd://{resource}"
+                )
+                and "config_path" in str(template.model_dump(by_alias=True)["uriTemplate"])
+                for template in templates
+            )
+
     def test_returns_reference_and_page_templates(self):
         templates = asyncio.run(list_resource_templates())
         uri_templates = [t.uri_template for t in templates]
