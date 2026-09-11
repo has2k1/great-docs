@@ -160,7 +160,9 @@ def fenced_code_spans(content: str) -> list[tuple[int, int]]:
 
     Reuse the same fence-detection rule as `source_reference_spans` (`_FENCE`)
     so a line one function treats as displayed code can never disagree with
-    what the other protects.
+    what the other protects. Raw HTML passthrough fences (`{=html}`/`{html}`)
+    are excluded, matching `source_reference_spans`'s own `raw`/`protect`
+    distinction. Their content is live output, not a displayed example.
 
     Parameters
     ----------
@@ -170,24 +172,28 @@ def fenced_code_spans(content: str) -> list[tuple[int, int]]:
     Returns
     -------
     list[tuple[int, int]]
-        Character-offset spans covering each fenced block, delimiters included.
+        Character-offset spans covering each non-raw fenced block, delimiters included.
     """
     spans: list[tuple[int, int]] = []
     offset = 0
     fence = ""
+    raw = False
     start = 0
     for line in content.splitlines(keepends=True):
         if fence:
             stripped = line.strip()
             if stripped and set(stripped) == {fence[0]} and len(stripped) >= len(fence):
-                spans.append((start, offset + len(line)))
+                if not raw:
+                    spans.append((start, offset + len(line)))
                 fence = ""
+                raw = False
         else:
             match = _FENCE.match(line.rstrip("\r\n"))
             if match:
                 fence = match["fence"]
+                raw = match["info"].strip() in {"{=html}", "{html}"}
                 start = offset
         offset += len(line)
-    if fence:
+    if fence and not raw:
         spans.append((start, offset))
     return spans
