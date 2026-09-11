@@ -152,3 +152,42 @@ def source_reference_spans(content: str, *, html: bool = False) -> list[tuple[in
                 name = "angle" if match["angle"] is not None else "plain"
                 spans.append(match.span(name))
     return sorted(set(spans))
+
+
+def fenced_code_spans(content: str) -> list[tuple[int, int]]:
+    """
+    Locate fenced code block bodies, including their delimiter lines
+
+    Reuse the same fence-detection rule as `source_reference_spans` (`_FENCE`)
+    so a line one function treats as displayed code can never disagree with
+    what the other protects.
+
+    Parameters
+    ----------
+    content
+        The Markdown source to scan.
+
+    Returns
+    -------
+    list[tuple[int, int]]
+        Character-offset spans covering each fenced block, delimiters included.
+    """
+    spans: list[tuple[int, int]] = []
+    offset = 0
+    fence = ""
+    start = 0
+    for line in content.splitlines(keepends=True):
+        if fence:
+            stripped = line.strip()
+            if stripped and set(stripped) == {fence[0]} and len(stripped) >= len(fence):
+                spans.append((start, offset + len(line)))
+                fence = ""
+        else:
+            match = _FENCE.match(line.rstrip("\r\n"))
+            if match:
+                fence = match["fence"]
+                start = offset
+        offset += len(line)
+    if fence:
+        spans.append((start, offset))
+    return spans

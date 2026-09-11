@@ -17,7 +17,7 @@ from yaml.events import AliasEvent
 from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from yaml12 import read_yaml
 
-from great_docs._source_refs import source_reference_spans
+from great_docs._source_refs import fenced_code_spans, source_reference_spans
 
 from .model import MigrationError, Move, absolute_path, check_symlinks, moved_path
 
@@ -350,17 +350,31 @@ def rewrite_document(
             follow_up.append(f"Review dynamic code and working-directory assumptions in {source}")
         if "{{<" in text:
             follow_up.append(f"Review Quarto shortcode inputs in {source}")
-            for match in re.finditer(r"\{\{<\s*(?:include|code-include)\s+([^>]+?)\s*>}}", text):
-                reference = match[1].strip().strip("\"'")
+            fenced = fenced_code_spans(text)
+            matches = [
+                match
+                for match in re.finditer(r"\{\{<\s*(?:include|code-include)\s+([^>]+?)\s*>}}", text)
+                if not any(start <= match.start() < end for start, end in fenced)
+            ]
+            for match in reversed(matches):
+                raw = match[1]
+                reference = raw.strip().strip("\"'")
                 target = local_path(reference, source.parent)
-                if target is not None:
-                    inputs.add(target)
-                    if not target.exists() or absolute_path(
-                        relocated.parent / reference
-                    ) != moved_path(target, moves):
-                        blockers.append(
-                            f"Cannot preserve include reference in {source}: {reference}"
-                        )
+                if target is None:
+                    continue
+                inputs.add(target)
+                if not target.exists():
+                    blockers.append(f"Cannot preserve include reference in {source}: {reference}")
+                    continue
+                moved = moved_path(target, moves)
+                if absolute_path(relocated.parent / reference) == moved:
+                    continue
+                if raw.strip() != reference or " " in reference:
+                    blockers.append(f"Cannot preserve include reference in {source}: {reference}")
+                    continue
+                new_reference = Path(os.path.relpath(moved, relocated.parent)).as_posix()
+                start, end = match.span(1)
+                text = text[:start] + new_reference + text[end:]
         if re.search(r"\b(?:srcset|data-src|style)\s*=", text):
             follow_up.append(f"Review unsupported HTML file references in {source}")
         frontmatter = re.match(r"\A---\s*\n(.*?)\n---\s*(?:\n|$)", text, re.DOTALL)
