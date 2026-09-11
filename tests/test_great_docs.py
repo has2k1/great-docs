@@ -143,6 +143,7 @@ from great_docs._apiref.spec import ChildrenStyle, SpecObject, SpecOptions, Spec
 from great_docs._apiref.typing_information import TypeInformation, TypeSections
 from great_docs._apiref.write import _insert_contents
 from great_docs._apiref.write import merge_frontmatter as _merge_frontmatter
+from great_docs._utils import QUARTO_YML_HEADER
 from great_docs.cli import (
     _detect_optional_dependencies,
     _detect_package_manager,
@@ -235,14 +236,15 @@ def test_install_creates_files():
         # Check that config file was created
         project_path = Path(tmp_dir)
 
-        assert (project_path / "great-docs.yml").exists()
+        assert (project_path / "docs/great-docs.yml").exists()
 
         # Check that .gitignore was updated (or created)
         gitignore_path = project_path / ".gitignore"
         if gitignore_path.exists():
             content = gitignore_path.read_text()
 
-            assert "great-docs/" in content
+            assert "docs/_quarto/" in content
+            assert "docs/_site/" in content
 
 
 def test_uninstall_removes_files():
@@ -255,16 +257,16 @@ def test_uninstall_removes_files():
 
         project_path = Path(tmp_dir)
 
-        assert (project_path / "great-docs.yml").exists()
+        assert (project_path / "docs/great-docs.yml").exists()
 
         # Then uninstall
         docs.uninstall()
 
         # Check that config was removed
-        assert not (project_path / "great-docs.yml").exists()
+        assert not (project_path / "docs/great-docs.yml").exists()
 
-        # Check that great-docs directory was removed if it existed
-        assert not (project_path / "great-docs").exists()
+        assert not docs.layout.build_dir.exists()
+        assert not docs.layout.site_dir.exists()
 
 
 def test_build_requires_config():
@@ -286,14 +288,15 @@ def test_init_refuses_when_config_exists():
         docs = GreatDocs(project_path=tmp_dir)
         docs.install(force=True)
 
-        assert (project_path / "great-docs.yml").exists()
+        assert (project_path / "docs/great-docs.yml").exists()
+        original = (project_path / "docs/great-docs.yml").read_bytes()
 
         # A second init without --force should refuse (not overwrite)
         docs2 = GreatDocs(project_path=tmp_dir)
         docs2.install(force=False)
 
         # The original file should still be there, unchanged
-        assert (project_path / "great-docs.yml").exists()
+        assert (project_path / "docs/great-docs.yml").read_bytes() == original
 
 
 def test_parse_package_exports_real_project():
@@ -9070,6 +9073,7 @@ def test_build_source_links_use_module_name(
 
         docs = GreatDocs(project_path=tmp_dir)
         docs.build_dir.mkdir(parents=True, exist_ok=True)
+        (docs.build_dir / "_quarto.yml").write_text(QUARTO_YML_HEADER)
 
         with pytest.raises(_StopBuild):
             docs.build(refresh=False)
@@ -17733,6 +17737,7 @@ def test_prepare_build_directory_cleans_existing():
 
         # Create a stale file in the build directory
         docs.build_dir.mkdir(parents=True, exist_ok=True)
+        (docs.build_dir / "_quarto.yml").write_text(QUARTO_YML_HEADER)
         stale_file = docs.build_dir / "stale.txt"
         stale_file.write_text("old content")
 
@@ -23435,6 +23440,7 @@ def test_uninstall_removes_config_and_dir():
         # Create build directory
         build_dir = Path(tmp_dir) / "great-docs"
         build_dir.mkdir()
+        (build_dir / "_quarto.yml").write_text(QUARTO_YML_HEADER)
         (build_dir / "index.qmd").write_text("# Test\n")
 
         docs = GreatDocs(project_path=tmp_dir)
@@ -23452,6 +23458,7 @@ def test_uninstall_removes_generated_historical_dirs_and_preserves_others(tmp_pa
 
     build_dir = tmp_path / "great-docs"
     build_dir.mkdir()
+    (build_dir / "_quarto.yml").write_text(QUARTO_YML_HEADER)
 
     historical = tmp_path / "great-docs-0.2"
     historical.mkdir()
@@ -24518,6 +24525,7 @@ def test_build_prepare_and_render_flow():
 
             docs._has_api_reference = True
             docs._config = MagicMock()
+            docs._config.versions = None
             docs._config.has_versions = False
             docs._config.changelog_enabled = False
             docs._config.sections = None
@@ -24526,7 +24534,7 @@ def test_build_prepare_and_render_flow():
             # Ensure project_path exists for _quarto.yml writes
             docs.build_dir.mkdir(parents=True, exist_ok=True)
             (docs.build_dir / "_quarto.yml").write_text(
-                "api-reference:\n  package: mypkg\n", encoding="utf-8"
+                QUARTO_YML_HEADER + "api-reference:\n  package: mypkg\n", encoding="utf-8"
             )
 
             docs.build(watch=False, refresh=True)
@@ -24565,11 +24573,13 @@ def test_build_no_api_reference():
 
             docs._has_api_reference = False
             docs._config = MagicMock()
+            docs._config.versions = None
             docs._config.has_versions = False
             docs._config.changelog_enabled = False
             docs._config.sections = None
 
             docs.build_dir.mkdir(parents=True, exist_ok=True)
+            (docs.build_dir / "_quarto.yml").write_text(QUARTO_YML_HEADER)
 
             docs.build(watch=False, refresh=False)
 
@@ -24621,6 +24631,7 @@ def test_build_dynamic_fallback_to_static():
 
             docs._has_api_reference = True
             docs._config = MagicMock()
+            docs._config.versions = None
             docs._config.has_versions = False
             docs._config.changelog_enabled = False
             docs._config.sections = None
@@ -24628,7 +24639,8 @@ def test_build_dynamic_fallback_to_static():
 
             docs.build_dir.mkdir(parents=True, exist_ok=True)
             (docs.build_dir / "_quarto.yml").write_text(
-                format_yaml({"api-reference": {"package": "mypkg", "dynamic": True}}),
+                QUARTO_YML_HEADER
+                + format_yaml({"api-reference": {"package": "mypkg", "dynamic": True}}),
                 encoding="utf-8",
             )
 
@@ -24668,13 +24680,15 @@ def test_build_static_mode_failure_exits():
         ):
             docs._has_api_reference = True
             docs._config = MagicMock()
+            docs._config.versions = None
             docs._config.changelog_enabled = False
             docs._config.sections = None
             docs._config.dynamic = True
 
             docs.build_dir.mkdir(parents=True, exist_ok=True)
             (docs.build_dir / "_quarto.yml").write_text(
-                format_yaml({"api-reference": {"package": "mypkg", "dynamic": True}}),
+                QUARTO_YML_HEADER
+                + format_yaml({"api-reference": {"package": "mypkg", "dynamic": True}}),
                 encoding="utf-8",
             )
 
@@ -24713,13 +24727,14 @@ def test_build_non_dynamic_failure_exits():
         ):
             docs._has_api_reference = True
             docs._config = MagicMock()
+            docs._config.versions = None
             docs._config.changelog_enabled = False
             docs._config.sections = None
             docs._config.dynamic = False
 
             docs.build_dir.mkdir(parents=True, exist_ok=True)
             (docs.build_dir / "_quarto.yml").write_text(
-                format_yaml({"api-reference": {"package": "mypkg"}}),
+                QUARTO_YML_HEADER + format_yaml({"api-reference": {"package": "mypkg"}}),
                 encoding="utf-8",
             )
 
@@ -24763,11 +24778,13 @@ def test_build_with_changelog():
 
             docs._has_api_reference = False
             docs._config = MagicMock()
+            docs._config.versions = None
             docs._config.has_versions = False
             docs._config.changelog_enabled = True
             docs._config.sections = None
 
             docs.build_dir.mkdir(parents=True, exist_ok=True)
+            (docs.build_dir / "_quarto.yml").write_text(QUARTO_YML_HEADER)
 
             docs.build(watch=False, refresh=False)
 
@@ -24810,11 +24827,13 @@ def test_build_changelog_error_handled():
 
             docs._has_api_reference = False
             docs._config = MagicMock()
+            docs._config.versions = None
             docs._config.has_versions = False
             docs._config.changelog_enabled = True
             docs._config.sections = None
 
             docs.build_dir.mkdir(parents=True, exist_ok=True)
+            (docs.build_dir / "_quarto.yml").write_text(QUARTO_YML_HEADER)
 
             # Should not raise
             docs.build(watch=False, refresh=False)
@@ -24860,11 +24879,13 @@ def test_build_with_cli_documentation():
 
             docs._has_api_reference = False
             docs._config = MagicMock()
+            docs._config.versions = None
             docs._config.has_versions = False
             docs._config.changelog_enabled = False
             docs._config.sections = None
 
             docs.build_dir.mkdir(parents=True, exist_ok=True)
+            (docs.build_dir / "_quarto.yml").write_text(QUARTO_YML_HEADER)
 
             docs.build(watch=False, refresh=False)
 
@@ -24903,11 +24924,13 @@ def test_build_with_sections():
 
             docs._has_api_reference = False
             docs._config = MagicMock()
+            docs._config.versions = None
             docs._config.has_versions = False
             docs._config.changelog_enabled = False
             docs._config.sections = [{"title": "Recipes"}]
 
             docs.build_dir.mkdir(parents=True, exist_ok=True)
+            (docs.build_dir / "_quarto.yml").write_text(QUARTO_YML_HEADER)
 
             docs.build(watch=False, refresh=False)
 
@@ -24944,11 +24967,13 @@ def test_build_with_assets_triggers_config_update():
 
             docs._has_api_reference = False
             docs._config = MagicMock()
+            docs._config.versions = None
             docs._config.has_versions = False
             docs._config.changelog_enabled = False
             docs._config.sections = None
 
             docs.build_dir.mkdir(parents=True, exist_ok=True)
+            (docs.build_dir / "_quarto.yml").write_text(QUARTO_YML_HEADER)
 
             docs.build(watch=False, refresh=False)
 
@@ -24977,6 +25002,7 @@ def test_build_watch_mode():
         ):
             docs._has_api_reference = False
             docs._config = MagicMock()
+            docs._config.versions = None
             docs._config.has_versions = False
             docs._config.changelog_enabled = False
             docs._config.sections = None
@@ -24986,6 +25012,7 @@ def test_build_watch_mode():
             docs._config.attribution = False
 
             docs.build_dir.mkdir(parents=True, exist_ok=True)
+            (docs.build_dir / "_quarto.yml").write_text(QUARTO_YML_HEADER)
 
             docs.build(watch=True, refresh=False)
 
@@ -25022,11 +25049,13 @@ def test_build_quarto_render_failure():
 
             docs._has_api_reference = False
             docs._config = MagicMock()
+            docs._config.versions = None
             docs._config.has_versions = False
             docs._config.changelog_enabled = False
             docs._config.sections = None
 
             docs.build_dir.mkdir(parents=True, exist_ok=True)
+            (docs.build_dir / "_quarto.yml").write_text(QUARTO_YML_HEADER)
 
             with pytest.raises(SystemExit):
                 docs.build(watch=False, refresh=False)
@@ -25066,11 +25095,13 @@ def test_build_cli_error_handled():
 
             docs._has_api_reference = False
             docs._config = MagicMock()
+            docs._config.versions = None
             docs._config.has_versions = False
             docs._config.changelog_enabled = False
             docs._config.sections = None
 
             docs.build_dir.mkdir(parents=True, exist_ok=True)
+            (docs.build_dir / "_quarto.yml").write_text(QUARTO_YML_HEADER)
 
             docs.build(watch=False, refresh=False)
 
@@ -27853,11 +27884,13 @@ def test_build_section_error_handled():
 
             docs._has_api_reference = False
             docs._config = MagicMock()
+            docs._config.versions = None
             docs._config.has_versions = False
             docs._config.changelog_enabled = False
             docs._config.sections = [{"title": "Test"}]
 
             docs.build_dir.mkdir(parents=True, exist_ok=True)
+            (docs.build_dir / "_quarto.yml").write_text(QUARTO_YML_HEADER)
 
             # Should not raise
             docs.build(watch=False, refresh=False)
@@ -27892,11 +27925,13 @@ def test_build_user_guide_error_handled():
 
             docs._has_api_reference = False
             docs._config = MagicMock()
+            docs._config.versions = None
             docs._config.has_versions = False
             docs._config.changelog_enabled = False
             docs._config.sections = None
 
             docs.build_dir.mkdir(parents=True, exist_ok=True)
+            (docs.build_dir / "_quarto.yml").write_text(QUARTO_YML_HEADER)
 
             # Should not raise
             docs.build(watch=False, refresh=False)
@@ -27931,11 +27966,13 @@ def test_build_copy_assets_error_handled():
 
             docs._has_api_reference = False
             docs._config = MagicMock()
+            docs._config.versions = None
             docs._config.has_versions = False
             docs._config.changelog_enabled = False
             docs._config.sections = None
 
             docs.build_dir.mkdir(parents=True, exist_ok=True)
+            (docs.build_dir / "_quarto.yml").write_text(QUARTO_YML_HEADER)
 
             # Should not raise
             docs.build(watch=False, refresh=False)
@@ -27976,11 +28013,13 @@ def test_build_changelog_no_releases():
 
             docs._has_api_reference = False
             docs._config = MagicMock()
+            docs._config.versions = None
             docs._config.has_versions = False
             docs._config.changelog_enabled = True
             docs._config.sections = None
 
             docs.build_dir.mkdir(parents=True, exist_ok=True)
+            (docs.build_dir / "_quarto.yml").write_text(QUARTO_YML_HEADER)
 
             docs.build(watch=False, refresh=False)
 
@@ -28015,11 +28054,13 @@ def test_build_changelog_no_repo():
 
             docs._has_api_reference = False
             docs._config = MagicMock()
+            docs._config.versions = None
             docs._config.has_versions = False
             docs._config.changelog_enabled = True
             docs._config.sections = None
 
             docs.build_dir.mkdir(parents=True, exist_ok=True)
+            (docs.build_dir / "_quarto.yml").write_text(QUARTO_YML_HEADER)
 
             docs.build(watch=False, refresh=False)
 
@@ -28048,6 +28089,7 @@ def _make_uqc_docs(tmp_dir, gd_yml_content="", pyproject_content=None, quarto_co
         }
 
     with open(quarto_yml, "w") as f:
+        f.write(QUARTO_YML_HEADER)
         write_yaml(quarto_content, f)
 
     return docs, quarto_yml
@@ -29958,7 +30000,7 @@ def test_cli_init_success():
 
             result = runner.invoke(init, ["--project-path", tmp_dir])
             assert result.exit_code == 0
-            MockGD.assert_called_once_with(project_path=tmp_dir)
+            MockGD.assert_called_once_with(project_path=tmp_dir, config_path=None, create=True)
             mock_instance.install.assert_called_once_with(force=False)
 
 
@@ -30157,7 +30199,7 @@ def test_cli_config_success():
         assert result.exit_code == 0
         assert "Created" in result.output
 
-        config_file = Path(tmp_dir) / "great-docs.yml"
+        config_file = Path(tmp_dir) / "docs/great-docs.yml"
         assert config_file.exists()
 
 
@@ -34648,6 +34690,7 @@ def test_prepare_build_directory_config_js_branches():
         docs = GreatDocs(project_path=tmp_dir)
         # Ensure the docs dir exists
         docs.build_dir.mkdir(parents=True, exist_ok=True)
+        (docs.build_dir / "_quarto.yml").write_text(QUARTO_YML_HEADER)
         # Copy scss so the method doesn't fail
         scss_src = docs.assets_path / "great-docs.scss"
         if scss_src.exists():
@@ -42026,10 +42069,9 @@ def test_generate_sitemap_xml_basic():
             "seo:\n  sitemap: true\n  canonical:\n    base_url: https://example.com/\n"
         )
         gd = GreatDocs(project_path=tmp)
-        gd.build_dir = project
 
-        site_dir = project / "_site"
-        site_dir.mkdir()
+        site_dir = gd.layout.site_dir
+        site_dir.mkdir(parents=True)
         (site_dir / "index.html").write_text("<html></html>")
         sub = site_dir / "reference"
         sub.mkdir()
@@ -42053,7 +42095,6 @@ def test_generate_sitemap_xml_no_site_dir(capsys):
             "seo:\n  sitemap: true\n  canonical:\n    base_url: https://example.com/\n"
         )
         gd = GreatDocs(project_path=tmp)
-        gd.build_dir = project
 
         gd._generate_sitemap_xml()
         captured = capsys.readouterr()
@@ -42066,10 +42107,9 @@ def test_generate_sitemap_xml_no_base_url(capsys):
         project = Path(tmp)
         (project / "great-docs.yml").write_text("seo:\n  sitemap: true\n")
         gd = GreatDocs(project_path=tmp)
-        gd.build_dir = project
 
-        site_dir = project / "_site"
-        site_dir.mkdir()
+        site_dir = gd.layout.site_dir
+        site_dir.mkdir(parents=True)
         (site_dir / "index.html").write_text("<html></html>")
 
         gd._generate_sitemap_xml()
@@ -42088,10 +42128,9 @@ def test_generate_robots_txt_basic():
             "seo:\n  robots: true\n  sitemap: true\n  canonical:\n    base_url: https://example.com/\n"
         )
         gd = GreatDocs(project_path=tmp)
-        gd.build_dir = project
 
-        site_dir = project / "_site"
-        site_dir.mkdir()
+        site_dir = gd.layout.site_dir
+        site_dir.mkdir(parents=True)
 
         gd._generate_robots_txt()
 
@@ -42109,7 +42148,6 @@ def test_generate_robots_txt_no_site_dir(capsys):
         project = Path(tmp)
         (project / "great-docs.yml").write_text("seo:\n  robots: true\n")
         gd = GreatDocs(project_path=tmp)
-        gd.build_dir = project
 
         gd._generate_robots_txt()
         captured = capsys.readouterr()
