@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 from mcp.types import CompletionArgument, ResourceTemplateReference
 
-from great_docs._utils import QUARTO_YML_HEADER
+from great_docs._layout import Layout
+from great_docs._utils import QUARTO_YML_HEADER, is_in_great_docs_build_dir
 from great_docs.mcp import _sibling_build_dirs, handle_completion
 
 
@@ -38,6 +39,26 @@ class TestSiblingBuildDirs:
         result = _sibling_build_dirs(tmp_path)
 
         assert result == []
+
+    @pytest.mark.parametrize("directory", ["docs", "website"])
+    def test_selected_layout(self, tmp_path: Path, directory: str) -> None:
+        source = tmp_path / directory
+        source.mkdir()
+        config = source / "great-docs.yml"
+        config.write_text("module: sample\n")
+        layout = Layout.make(tmp_path, config)
+        historical = source / "_quarto/v1.5.0"
+        self._make_build_dir(historical)
+        assert _sibling_build_dirs(tmp_path, layout=layout) == [historical]
+        assert is_in_great_docs_build_dir(
+            (directory, "_quarto", "v1.5.0", "index.qmd"), tmp_path, layout
+        )
+        assert not is_in_great_docs_build_dir(
+            (directory, "examples", "_quarto", "v1.5.0", "index.qmd"), tmp_path, layout
+        )
+        assert not is_in_great_docs_build_dir(
+            (directory, "_quarto", "notes", "index.qmd"), tmp_path, layout
+        )
 
 
 class TestCleanRemovesSiblings:

@@ -6,6 +6,10 @@ import pytest
 from yaml12 import read_yaml, write_yaml
 
 from great_docs import GreatDocs
+from great_docs._layout import Layout
+from great_docs._utils import QUARTO_YML_HEADER
+from great_docs._versioned_build import assemble_site, run_versioned_build
+from great_docs._versioning import VersionEntry, build_version_map, parse_versions_config
 
 
 @pytest.fixture(params=[".", "docs", "website"])
@@ -20,6 +24,207 @@ def source_project(tmp_path: Path, request: pytest.FixtureRequest) -> tuple[Path
 
 def make_docs(root: Path, source: Path) -> GreatDocs:
     return GreatDocs(str(root), config_path=str(source / "great-docs.yml"))
+
+
+def test_git_ref_does_not_rename_build(tmp_path: Path) -> None:
+    config = tmp_path / "docs" / "great-docs.yml"
+    config.parent.mkdir()
+    config.write_text("display_name: Demo\n")
+    layout = Layout.make(tmp_path, config)
+    entry = VersionEntry(tag="1.5.0", label="1.5", git_ref="v1.5.0")
+    assert layout.build_dir_for(entry.tag, "2.0.0") == tmp_path / "docs/_quarto/1.5.0"
+    assert layout.build_dir_for("2.0.0", "2.0.0") == layout.build_dir
+
+
+@pytest.mark.parametrize(
+    "tag,segment",
+    [
+        ("v1.5.0", "1.5.0"),
+        ("1.5.0", "1.5.0"),
+        ("v1.5rc1", "1.5rc1"),
+        ("version-next", "version-next"),
+    ],
+)
+def test_layout_version_assembly(source_project: tuple[Path, Path], tag: str, segment: str) -> None:
+    root, source = source_project
+    layout = make_docs(root, source).layout
+    versions = parse_versions_config(["2.0", tag])
+    for entry in versions:
+        build = layout.build_dir_for(entry.tag, "2.0")
+        assert build.parent == layout.build_dir.parent
+        (build / "_site").mkdir(parents=True)
+        (build / "_quarto.yml").write_text(QUARTO_YML_HEADER)
+        (build / "_site/index.html").write_text(entry.tag)
+    assemble_site(layout.build_dir, versions, "2.0", layout.site_dir, layout=layout)
+    assert (layout.site_dir / "index.html").read_text() == "2.0"
+    assert (layout.site_dir / "v" / segment / "index.html").read_text() == tag
+    assert (layout.build_dir_for(tag, "2.0") / "_site/index.html").read_text() == tag
+    manifest = build_version_map(versions, {tag: ["index.html"]})
+    assert manifest["versions"][1]["tag"] == tag
+    assert manifest["versions"][1]["path_prefix"] == f"v/{segment}"
+    if source != root:
+        assemble_site(layout.build_dir, versions[:1], "2.0", layout.site_dir, layout=layout)
+        assert not (layout.site_dir / "v").exists()
+
+
+@pytest.mark.parametrize(
+    "tags", [["v1.5.0", "1.5.0"], ["2.0", "v1.5.0", "1.5.0"], ["2.0", "release/1", "release-1"]]
+)
+@pytest.mark.parametrize("latest_only", [True, False])
+def test_version_collisions_precede_output(
+    source_project: tuple[Path, Path], tags: list[str], latest_only: bool
+) -> None:
+    root, source = source_project
+    gd = make_docs(root, source)
+    with pytest.raises(ValueError):
+        run_versioned_build(gd.build_dir, root, tags, latest_only=latest_only, layout=gd.layout)
+    assert not gd.build_dir.exists()
+    assert not gd.layout.site_dir.exists()
+
+
+@pytest.mark.parametrize("tag", [".", "..", "default"])
+def test_unsafe_historical_build_names(source_project: tuple[Path, Path], tag: str) -> None:
+    root, source = source_project
+    if root == source:
+        pytest.skip("Legacy sibling prefixes keep these names within the package")
+    gd = make_docs(root, source)
+    with pytest.raises(ValueError):
+        run_versioned_build(gd.build_dir, root, ["2.0", tag], latest_only=True, layout=gd.layout)
+    assert not gd.build_dir.parent.exists()
+
+
+def test_freeze_round_trip(
+    source_project: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import runpy
+
+    root, source = source_project
+    gd = make_docs(root, source)
+    for tag, files in [
+        ("1.0", {"guide/old.json": "old", "guide/shared.json": "historical"}),
+        ("2.0", {"guide/new.json": "new", "guide/shared.json": "latest"}),
+    ]:
+        build = gd.layout.build_dir_for(tag, "2.0")
+        build.mkdir(parents=True)
+        (build / "_quarto.yml").write_text(QUARTO_YML_HEADER)
+        for name, content in files.items():
+            cache = build / "_freeze" / name
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            cache.write_text(content)
+    assert gd._persist_freeze_cache() == 3
+    assert (gd.layout.freeze_dir / "guide/old.json").read_text() == "old"
+    assert (gd.layout.freeze_dir / "guide/shared.json").read_text() == "latest"
+    assert gd._persist_freeze_cache() == 3
+    monkeypatch.chdir(gd.layout.build_dir_for("1.0", "2.0"))
+    runpy.run_path(str(gd.assets_path / "restore-freeze.py"))
+    assert (Path.cwd() / "_freeze/guide/shared.json").read_text() == "latest"
+    if root != source:
+        assert not (root / "_freeze").exists()
+
+
+@pytest.mark.parametrize("symlink", [False, True])
+def test_latest_collision_preserves_source(
+    source_project: tuple[Path, Path], symlink: bool
+) -> None:
+    root, source = source_project
+    gd = make_docs(root, source)
+    original = source / "original"
+    original.mkdir()
+    (original / "keep.txt").write_text("keep")
+    gd.build_dir.parent.mkdir(parents=True, exist_ok=True)
+    if symlink:
+        gd.build_dir.symlink_to(original, target_is_directory=True)
+    else:
+        gd.build_dir.mkdir()
+        (gd.build_dir / "keep.txt").write_text("keep")
+    with pytest.raises(ValueError):
+        gd._prepare_build_directory()
+    assert (original / "keep.txt").read_text() == "keep"
+    assert (gd.build_dir / "keep.txt").read_text() == "keep"
+
+
+def test_unowned_deployment_is_preserved(source_project: tuple[Path, Path]) -> None:
+    root, source = source_project
+    if root == source:
+        pytest.skip("Legacy output belongs to its Quarto project")
+    gd = make_docs(root, source)
+    gd.layout.site_dir.mkdir()
+    (gd.layout.site_dir / "keep.txt").write_text("keep")
+    with pytest.raises(ValueError):
+        assemble_site(gd.build_dir, [], "", gd.layout.site_dir, layout=gd.layout)
+    assert (gd.layout.site_dir / "keep.txt").read_text() == "keep"
+
+
+def test_nonversion_assembly_and_uninstall(source_project: tuple[Path, Path]) -> None:
+    root, source = source_project
+    gd = make_docs(root, source)
+    gd._prepare_build_directory()
+    local_site = gd.build_dir / "_site"
+    local_site.mkdir()
+    (local_site / "index.html").write_text("home")
+    assemble_site(gd.build_dir, [], "", gd.layout.site_dir, layout=gd.layout)
+    assert (gd.layout.site_dir / "index.html").read_text() == "home"
+    assert (local_site / "index.html").read_text() == "home"
+    unrelated = gd.build_dir.parent / "great-docs-notes"
+    unrelated.mkdir()
+    (unrelated / "notes.qmd").write_text("source")
+    gd.uninstall()
+    assert not gd.build_dir.exists()
+    assert not gd.layout.site_dir.exists()
+    assert (unrelated / "notes.qmd").read_text() == "source"
+
+
+@pytest.mark.parametrize("operation", ["build", "uninstall"])
+def test_site_inventory_protects_added_content(
+    source_project: tuple[Path, Path], operation: str
+) -> None:
+    root, source = source_project
+    if source == root:
+        pytest.skip("Legacy deployment remains inside the generated project")
+    gd = make_docs(root, source)
+    gd._prepare_build_directory()
+    (gd.build_dir / "_site").mkdir()
+    (gd.build_dir / "_site/index.html").write_text("home")
+    assemble_site(gd.build_dir, [], "", gd.layout.site_dir, layout=gd.layout)
+    (gd.layout.site_dir / "added.txt").write_text("keep")
+    with pytest.raises(ValueError, match="unrecognised"):
+        if operation == "build":
+            gd._prepare_build_directory()
+        else:
+            gd.uninstall()
+    assert (gd.layout.site_dir / "added.txt").read_text() == "keep"
+    assert gd.layout.config_path.is_file()
+    assert (gd.build_dir / "_site/index.html").read_text() == "home"
+
+
+def test_build_collision_precedes_config_refresh(source_project: tuple[Path, Path]) -> None:
+    root, source = source_project
+    config = source / "great-docs.yml"
+    text = "module: sample\nversions: [v1.5.0, 1.5.0]\n"
+    config.write_text(text)
+    gd = make_docs(root, source)
+    with patch("great_docs.core._ensure_quarto_installed", side_effect=AssertionError("too late")):
+        with pytest.raises(ValueError, match="URL segment"):
+            gd.build(latest_only=True)
+    assert config.read_text() == text
+    assert not gd.build_dir.exists()
+
+
+def test_freeze_custom_config_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import runpy
+
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "sample"\nversion = "1.0"\n')
+    source = tmp_path / "website"
+    source.mkdir()
+    config = source / "custom.yml"
+    config.write_text("module: sample\n")
+    (source / "_freeze").mkdir()
+    (source / "_freeze/result.json").write_text("cached")
+    gd = GreatDocs(str(tmp_path), config_path=str(config))
+    gd._prepare_build_directory()
+    monkeypatch.chdir(gd.build_dir)
+    runpy.run_path(str(gd.build_dir / "scripts/restore-freeze.py"))
+    assert (gd.build_dir / "_freeze/result.json").read_text() == "cached"
 
 
 @pytest.mark.parametrize("explicit", [False, True])

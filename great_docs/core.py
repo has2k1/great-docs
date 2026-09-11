@@ -16,7 +16,15 @@ from ._layout import Layout
 from ._source_refs import source_reference_spans
 from ._subprocess import TEXT_MODE_KWARGS
 from ._typer_cli import is_cli_command, is_cli_group, param_kind, to_click_command
-from ._utils import QUARTO_YML_HEADER, is_great_docs_build_dir
+from ._utils import (
+    QUARTO_YML_HEADER,
+    is_great_docs_build_dir,
+    recognised_build_dirs,
+    record_site_ownership,
+    validate_build_dir,
+    validate_layout_outputs,
+    validate_tree_symlinks,
+)
 from .config import Config, create_default_config
 
 if TYPE_CHECKING:
@@ -306,6 +314,21 @@ class GreatDocs:
             "end_line": end_lineno or obj.lineno,
         }
 
+    def _validate_build_outputs(self) -> None:
+        """Reject version and ownership conflicts before changing project files"""
+        validate_layout_outputs(self.layout)
+        validate_build_dir(self.build_dir)
+        if self._config.versions:
+            from ._versioned_build import _check_build_dir_collisions
+            from ._versioning import get_latest_version, parse_versions_config
+
+            versions = parse_versions_config(self._config.versions)
+            latest = get_latest_version(versions)
+            latest_tag = latest.tag if latest else versions[0].tag
+            _check_build_dir_collisions(self.layout.build_dir, versions, latest_tag, self.layout)
+            for entry in versions:
+                validate_build_dir(self.layout.build_dir_for(entry.tag, latest_tag))
+
     def _prepare_build_directory(self) -> None:  # pragma: no cover
         """
         Prepare the great-docs/ build directory with all necessary assets.
@@ -318,6 +341,8 @@ class GreatDocs:
         version control. It will be recreated on each build.
         """
         print(f"Preparing build directory: {self.build_dir.relative_to(self.project_root)}/")
+
+        self._validate_build_outputs()
 
         hook_names = [Path(path).name for path in self._config.pre_render]
         if len(hook_names) != len(set(hook_names)) or set(hook_names) & {
@@ -596,6 +621,7 @@ class GreatDocs:
 
         # Write options JSON for the post-render script
         gd_options = {
+            "freeze_dir": os.path.relpath(self.layout.freeze_dir, self.build_dir),
             "markdown_pages": self._config.markdown_pages,
             "show_dates": self._config.show_dates,
             "date_format": self._config.date_format,
@@ -15049,7 +15075,7 @@ anchor-sections: true
         if not self._config.sitemap_enabled:
             return  # pragma: no cover
 
-        site_dir = self.build_dir / "_site"
+        site_dir = self.layout.site_dir
         if not site_dir.exists():
             print("   ⚠️  _site directory not found, skipping sitemap generation")
             return
@@ -15130,7 +15156,7 @@ anchor-sections: true
         if not self._config.robots_enabled:
             return  # pragma: no cover
 
-        site_dir = self.build_dir / "_site"
+        site_dir = self.layout.site_dir
         if not site_dir.exists():
             print("   ⚠️  _site directory not found, skipping robots.txt generation")
             return
@@ -15473,7 +15499,7 @@ anchor-sections: true
         import json
         from datetime import datetime, timezone
 
-        site_dir = self.build_dir / "_site"
+        site_dir = self.layout.site_dir
         if not site_dir.exists():
             return None  # pragma: no cover
 
@@ -15481,7 +15507,7 @@ anchor-sections: true
         # Check both the project root (where users persist _freeze/) and the
         # build/project path (where it's restored during rendering).
         frozen_stems: set[str] = set()
-        for freeze_dir in (self.project_root / "_freeze", self.build_dir / "_freeze"):
+        for freeze_dir in (self.layout.freeze_dir, self.build_dir / "_freeze"):
             if freeze_dir.is_dir():
                 for html_json in freeze_dir.rglob("execute-results/html.json"):
                     # _freeze/user-guide/benchmarks/execute-results/html.json
@@ -15700,38 +15726,37 @@ anchor-sections: true
         """
         print("Uninstalling great-docs from your project...")
 
+        validate_layout_outputs(self.layout)
+        builds = [self.layout.build_dir, *recognised_build_dirs(self.layout)]
+        for build_dir in builds:
+            validate_build_dir(build_dir)
+
         # Remove the great-docs.yml configuration file
         config_path = self.layout.config_path
         if config_path.exists():
             config_path.unlink()
             print(f"Removed {config_path.relative_to(self.project_root)}")
 
-        # Great Docs owns the configured build path.
-        if self.build_dir.exists():
-            shutil.rmtree(self.build_dir)
-            print(f"Removed {self.build_dir.relative_to(self.project_root)}/ directory")
-
-        # Only a generated header proves ownership of a historical directory.
-        # Symlinks can point outside the project root.
-        for build_dir in sorted(self.project_root.glob(f"{self.layout.build_dir.name}-*")):
-            if (
-                not build_dir.is_dir()
-                or build_dir.is_symlink()
-                or not is_great_docs_build_dir(build_dir)
-            ):
-                continue
-            shutil.rmtree(build_dir)
-            print(f"Removed {build_dir.relative_to(self.project_root)}/ directory")
+        for build_dir in builds:
+            if build_dir.exists():
+                shutil.rmtree(build_dir)
+                print(f"Removed {build_dir.relative_to(self.project_root)}/ directory")
+        if self.layout.source_dir != self.project_root:
+            if self.layout.site_dir.exists():
+                shutil.rmtree(self.layout.site_dir)
+            container = self.layout.build_dir.parent
+            if container.exists() and not any(container.iterdir()):
+                container.rmdir()
 
         print("✅ Great-docs uninstalled successfully!")
 
     def _persist_freeze_cache(self) -> int | None:
         """
-        Copy every build's freeze cache to the project root
+        Merge every build's freeze cache beside the selected configuration
 
         The latest version and a non-versioned build store their cache in
-        `great-docs/_freeze`. Historical versions store caches in sibling
-        `great-docs-<tag>/_freeze` directories. Merge individual files so a
+        their build directory. Historical versions store caches in sibling
+        build directories. Merge individual files so a
         page from one version cannot replace different pages in the same
         section. When versions cache the same path, the latest version wins.
 
@@ -15742,7 +15767,14 @@ anchor-sections: true
         freeze_sources: list[Path] = []
 
         # Merge historical caches first so the latest version wins collisions.
-        for ver_dir in sorted(self.project_root.glob(f"{self.layout.build_dir.name}-*")):
+        pattern = (
+            f"{self.layout.build_dir.name}-*"
+            if self.layout.source_dir == self.project_root
+            else "*"
+        )
+        for ver_dir in sorted(self.layout.build_dir.parent.glob(pattern)):
+            if ver_dir == self.layout.build_dir:
+                continue
             if not ver_dir.is_dir() or ver_dir.is_symlink() or not is_great_docs_build_dir(ver_dir):
                 continue
             candidate = ver_dir / "_freeze"
@@ -15757,10 +15789,13 @@ anchor-sections: true
         if not freeze_sources:
             return None
 
-        freeze_dst = self.project_root / "_freeze"
+        freeze_dst = self.layout.freeze_dir
+        validate_tree_symlinks(freeze_dst)
+        for src in freeze_sources:
+            validate_tree_symlinks(src)
         if freeze_dst.exists():  # pragma: no cover
             shutil.rmtree(freeze_dst)  # pragma: no cover
-        freeze_dst.mkdir()
+        freeze_dst.mkdir(parents=True)
 
         # Copy files individually. Replacing a top-level cache directory would
         # discard pages contributed by earlier sources.
@@ -15938,6 +15973,7 @@ anchor-sections: true
         ```
         """
         # Require an explicit config file; init must have been run first
+        self._validate_build_outputs()
         config_path = self.layout.config_path
         if not config_path.exists():
             raise FileNotFoundError(
@@ -16738,6 +16774,7 @@ anchor-sections: true
                     on_renders_done=_on_renders_done,
                     badge_expiry_raw=self._config["new_is_old"],
                     config=self._config,
+                    layout=self.layout,
                 )
 
                 for warning in vb_result.get("warnings", []):
@@ -16801,11 +16838,13 @@ anchor-sections: true
                 except Exception as e:
                     log.warn(f"Snapshot auto-save failed: {e}")
 
-                site_path = self.build_dir / "_site" / "index.html"
+                if self.layout.site_dir != self.build_dir / "_site":
+                    record_site_ownership(self.layout.site_dir)
+                site_path = self.layout.site_dir / "index.html"
                 if site_path.exists():
                     log.footer(site_path=str(site_path))
                 else:
-                    log.footer(site_path=str(self.build_dir / "_site"))
+                    log.footer(site_path=str(self.layout.site_dir))
             else:
                 bar = log.progress("Rendering pages", 1)
 
@@ -16890,6 +16929,13 @@ anchor-sections: true
                         )  # pragma: no cover
 
                     # ── Step 18: Generate SEO files ────────────────────
+                    if self.layout.site_dir != self.build_dir / "_site":
+                        from ._versioned_build import assemble_site
+
+                        assemble_site(
+                            self.build_dir, [], "", self.layout.site_dir, layout=self.layout
+                        )
+
                     step += 1  # pragma: no cover
                     log.step_start(step, "Generate SEO files")  # pragma: no cover
                     try:  # pragma: no cover
@@ -16919,12 +16965,15 @@ anchor-sections: true
                         except Exception as e:  # pragma: no cover
                             log.warn(f"Snapshot auto-save failed: {e}")  # pragma: no cover
 
-                    site_path = self.build_dir / "_site" / "index.html"  # pragma: no cover
+                    if self.layout.site_dir != self.build_dir / "_site":
+                        record_site_ownership(self.layout.site_dir)
+
+                    site_path = self.layout.site_dir / "index.html"  # pragma: no cover
                     if site_path.exists():  # pragma: no cover
                         log.footer(site_path=str(site_path))  # pragma: no cover
                     else:  # pragma: no cover
                         log.footer(  # pragma: no cover
-                            site_path=str(self.build_dir / "_site")
+                            site_path=str(self.layout.site_dir)
                         )
 
         finally:

@@ -31,7 +31,8 @@ from mcp.types import (
 )
 from pydantic import AnyUrl
 
-from ._utils import is_great_docs_build_dir, is_in_great_docs_build_dir
+from ._layout import Layout
+from ._utils import is_in_great_docs_build_dir, recognised_build_dirs
 
 server = Server("great-docs")
 
@@ -95,7 +96,7 @@ def _get_project_root(project_path: str | None = None) -> Path:
     return Path.cwd()
 
 
-def _sibling_build_dirs(root: Path) -> list[Path]:
+def _sibling_build_dirs(root: Path, layout: Layout | None = None) -> list[Path]:
     """
     Return historical Great Docs build directories under `root`
 
@@ -112,16 +113,10 @@ def _sibling_build_dirs(root: Path) -> list[Path]:
     -------
     Marked sibling directories in name order.
     """
-    dirs: list[Path] = []
-    for candidate in sorted(root.glob("great-docs-*")):
-        if not candidate.is_dir() or candidate.is_symlink():
-            continue
-        if is_great_docs_build_dir(candidate):
-            dirs.append(candidate)
-    return dirs
+    return recognised_build_dirs(layout or Layout.make(root))
 
 
-def _build_output_dirs(root: Path) -> list[Path]:
+def _build_output_dirs(root: Path, layout: Layout | None = None) -> list[Path]:
     """
     Return all Great Docs build directories under `root`
 
@@ -137,8 +132,13 @@ def _build_output_dirs(root: Path) -> list[Path]:
     -------
     Current and historical build directories.
     """
-    current = [root / "great-docs"] if (root / "great-docs").is_dir() else []
-    return current + _sibling_build_dirs(root)
+    layout = layout or Layout.make(root)
+    current = (
+        [layout.build_dir]
+        if layout.build_dir.is_dir() and not layout.build_dir.is_symlink()
+        else []
+    )
+    return current + _sibling_build_dirs(root, layout)
 
 
 def _get_great_docs(project_path: str | None = None):
@@ -1291,9 +1291,12 @@ async def handle_completion(
         if "page" in str(ref.uri) and argument.name == "path":
             # List source pages without their generated build copies.
             root = Path.cwd()
+            layout = Layout.make(root)
             rel_paths = (p.relative_to(root) for p in root.rglob("*.qmd"))
             qmd_files = sorted(
-                str(rel) for rel in rel_paths if not is_in_great_docs_build_dir(rel.parts, root)
+                str(rel)
+                for rel in rel_paths
+                if not is_in_great_docs_build_dir(rel.parts, root, layout)
             )
             filtered = [f for f in qmd_files if value.lower() in f.lower()]
             return Completion(values=filtered[:20], hasMore=len(filtered) > 20)

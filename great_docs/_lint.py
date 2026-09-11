@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from ._builtin.directives import DIRECTIVES
 from ._interlinks import AliasClaims, LoadedSources, build_index, load_sources
+from ._layout import Layout
 from ._utils import fenced_lines, is_in_great_docs_build_dir, parse_seealso
 
 if TYPE_CHECKING:
@@ -211,7 +212,9 @@ def run_lint(
         _check_cross_references(
             pkg, importable_name, exports, documented, index, sources.unread, result
         )
-        _check_ambiguous_references(index.dropped, _gather_prose(documented, project_root), result)
+        _check_ambiguous_references(
+            index.dropped, _gather_prose(documented, project_root, docs.layout), result
+        )
 
     if "style" in checks:
         _check_docstring_style(pkg, importable_name, exports, config_style, result)
@@ -220,7 +223,7 @@ def run_lint(
         _check_directive_consistency(pkg, importable_name, exports, result)
 
     if "stale-versions" in checks:
-        _check_stale_versions(project_root, result)
+        _check_stale_versions(project_root, result, docs.layout)
 
     return result
 
@@ -515,7 +518,9 @@ def _strip_code(text: str) -> str:
     return _CODE_SPAN_RE.sub("", prose)
 
 
-def _gather_prose(items: list[InventoryItem], project_root: Path) -> dict[str, str]:
+def _gather_prose(
+    items: list[InventoryItem], project_root: Path, layout: Layout | None = None
+) -> dict[str, str]:
     """
     Gather the text the ambiguity check scans
 
@@ -541,7 +546,8 @@ def _gather_prose(items: list[InventoryItem], project_root: Path) -> dict[str, s
         if docstring:
             prose[item.name] = docstring
 
-    for dirpath, dirnames, filenames in os.walk(project_root):
+    source_dir = layout.source_dir if layout is not None else project_root
+    for dirpath, dirnames, filenames in os.walk(source_dir):
         here = Path(dirpath)
         # Prune rather than filter afterwards. Quarto renders no path beginning
         # with an underscore, so those pages carry no reference the site can show,
@@ -554,7 +560,7 @@ def _gather_prose(items: list[InventoryItem], project_root: Path) -> dict[str, s
             and d not in _NOT_AUTHORED
             and not (here / d / "great-docs.yml").exists()
             and not is_in_great_docs_build_dir(
-                (here / d).relative_to(project_root).parts, project_root
+                (here / d).relative_to(project_root).parts, project_root, layout
             )
         ]
         for filename in sorted(filenames):
@@ -800,7 +806,9 @@ _DEFAULT_BADGE_THRESHOLD = 3  # releases behind latest
 _DEFAULT_CALLOUT_THRESHOLD = 4  # releases behind latest
 
 
-def _check_stale_versions(project_root: Path, result: LintResult) -> None:
+def _check_stale_versions(
+    project_root: Path, result: LintResult, layout: Layout | None = None
+) -> None:
     """
     Flag stale version-annotated content in .qmd files.
 
@@ -813,7 +821,7 @@ def _check_stale_versions(project_root: Path, result: LintResult) -> None:
     from yaml12 import read_yaml
 
     # Load great-docs.yml for versions list and optional lint config
-    config_path = project_root / "great-docs.yml"
+    config_path = layout.config_path if layout is not None else project_root / "great-docs.yml"
     if not config_path.exists():
         return
 
@@ -882,12 +890,13 @@ def _check_stale_versions(project_root: Path, result: LintResult) -> None:
     # Ignore generated build copies at the project root. Nested directories
     # with similar names remain part of the user's source tree.
     qmd_files = []
-    for qmd in project_root.rglob("*.qmd"):
+    source_dir = layout.source_dir if layout is not None else project_root
+    for qmd in source_dir.rglob("*.qmd"):
         rel = qmd.relative_to(project_root)
         parts = rel.parts
         if any(p.startswith("_") or p.startswith(".") for p in parts):
             continue
-        if is_in_great_docs_build_dir(parts, project_root):
+        if is_in_great_docs_build_dir(parts, project_root, layout):
             continue
         qmd_files.append(qmd)
 

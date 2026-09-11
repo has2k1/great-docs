@@ -4625,3 +4625,15 @@ class TestExpandVersionBadgesEdges:
         result = expand_version_badges(content, entry, versions)
         assert "gd-badge-new" in result
         assert "```python" in result
+
+
+# Both redirect formats and HTML aliases must use the same published segment.
+def test_prefixed_prerelease_redirects(tmp_path: Path) -> None:
+    versions = parse_versions_config(
+        [{"tag": "v2.0rc1", "prerelease": True}, {"tag": "1.0", "latest": True}]
+    )
+    create_version_aliases(tmp_path, versions, "1.0")
+    generate_redirect_files(tmp_path, versions, "1.0")
+    assert "/v/2.0rc1/" in (tmp_path / "v/dev/index.html").read_text()
+    assert "/v/2.0rc1/:splat" in (tmp_path / "_redirects").read_text()
+    assert "/v/2.0rc1/:path*" in (tmp_path / "vercel.json").read_text()

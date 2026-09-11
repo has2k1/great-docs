@@ -112,6 +112,8 @@ class Layout:
         safe_tag = _UNSAFE_TAG_CHARS.sub("-", tag)
         if self.source_dir == self.package_root:
             return self.build_dir.parent / f"{self.build_dir.name}-{safe_tag}"
+        if safe_tag in {"", ".", "..", "default"}:
+            raise LayoutError(f"Historical version tag {tag!r} cannot use build name {safe_tag!r}")
         return self.build_dir.parent / safe_tag
 
 
