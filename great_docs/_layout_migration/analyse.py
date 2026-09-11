@@ -11,11 +11,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from great_docs._content_naming import section_slug
 from great_docs._layout import Layout
 from great_docs._utils import is_great_docs_build_dir, recognised_build_dirs
 
 from .content import (
     ConfigPath,
+    ContentDirectory,
     config_paths,
     local_path,
     read_config,
@@ -308,6 +310,39 @@ def _dedicated_directories(config: dict[str, Any], root: Path) -> list[Path]:
     return [absolute_path(path) for path in selected]
 
 
+def _content_directories(config: dict[str, Any], root: Path) -> tuple[ContentDirectory, ...]:
+    """
+    Map each recognised content root to its build-time rename and prefix rule
+
+    Mirrors `_dedicated_directories`'s reading of the same `user_guide` and
+    `sections` config fields; keep the two in sync when either changes.
+    """
+    directories: list[ContentDirectory] = []
+    guide = config.get("user_guide")
+    strip = not isinstance(guide, list)
+    if isinstance(guide, str) and not Path(guide).is_absolute():
+        directories.append(ContentDirectory(root / guide, "user-guide", strip))
+    elif not isinstance(guide, str):
+        for name in ("user_guide", "user-guide"):
+            if (root / name).exists() or (root / name).is_symlink():
+                directories.append(ContentDirectory(root / name, "user-guide", strip))
+                break
+    for section in config.get("sections") or []:
+        if (
+            isinstance(section, dict)
+            and isinstance(section.get("dir"), str)
+            and not Path(section["dir"]).is_absolute()
+        ):
+            directories.append(
+                ContentDirectory(
+                    root / section["dir"],
+                    section_slug(section["dir"]),
+                    section.get("type") != "blog",
+                )
+            )
+    return tuple(directories)
+
+
 def analyse(layout: Layout, destination: Path) -> Migration:
     """
     Preview a root-layout migration without modifying the filesystem
@@ -431,6 +466,7 @@ def analyse(layout: Layout, destination: Path) -> Migration:
     except (OSError, MigrationError) as error:
         blockers.append(str(error))
         selected = []
+    content_directories = _content_directories(config, root)
     for name in ("index.qmd", "index.md"):
         if (root / name).exists() or (root / name).is_symlink():
             selected.append(root / name)
@@ -595,6 +631,7 @@ def analyse(layout: Layout, destination: Path) -> Migration:
                 path,
                 tuple(moves),
                 generated_homepage=generated_homepage,
+                content_directories=content_directories,
             )
             follow_up.extend(notes)
             blockers.extend(conflicts)

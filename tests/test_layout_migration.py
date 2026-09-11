@@ -893,3 +893,10 @@ def test_generated_reference_links_do_not_block_analysis(project: Path, extensio
     assert not migration.blockers
     assert not any(edit.path.suffix == ".qmd" for edit in migration.edits)
     assert snapshot(project) == before
+
+
+def test_bare_numeric_prefix_reference_is_not_a_broken_link(project: Path) -> None:
+    put(project, "user_guide/00-introduction.qmd", "[Install](installation.qmd)")
+    put(project, "user_guide/01-installation.qmd", "# Installation")
+    result = analyse(Layout.make(project), Path("docs"))
+    assert not result.blockers
