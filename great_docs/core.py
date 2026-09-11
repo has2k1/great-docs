@@ -8,14 +8,15 @@ from datetime import datetime
 from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import unquote, urlsplit, urlunsplit
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 from yaml12 import format_yaml, parse_yaml, read_yaml, write_yaml
 
 from ._layout import Layout
+from ._source_refs import source_reference_spans
 from ._subprocess import TEXT_MODE_KWARGS
 from ._typer_cli import is_cli_command, is_cli_group, param_kind, to_click_command
-from ._utils import QUARTO_YML_HEADER, fenced_lines, is_great_docs_build_dir
+from ._utils import QUARTO_YML_HEADER, is_great_docs_build_dir
 from .config import Config, create_default_config
 
 if TYPE_CHECKING:
@@ -744,7 +745,7 @@ class GreatDocs:
                 if page is None:
                     return reference
                 path = Path(os.path.relpath(page, destination_file.parent)).as_posix()
-                return urlunsplit(("", "", path, url.query, url.fragment))
+                return urlunsplit(("", "", quote(path, safe="/"), url.query, url.fragment))
             candidate = (destination_file.parent / unquote(url.path)).resolve()
             if not candidate.is_relative_to(self.build_dir.resolve()) or (
                 self.layout.source_dir != self.layout.package_root
@@ -761,33 +762,14 @@ class GreatDocs:
                 candidate = self.build_dir / "_shared" / relative
             copied = self._copy_source_asset(source, candidate)
             path = Path(os.path.relpath(copied, destination_file.parent)).as_posix()
-            return urlunsplit(("", "", path, url.query, url.fragment))
+            return urlunsplit(("", "", quote(path, safe="/"), url.query, url.fragment))
 
-        def replace(match: re.Match[str]) -> str:
-            reference = match.group("path")
-            if reference is None:
-                return match.group(0)
-            start, end = match.span("path")
-            offset = match.start()
-            return (
-                match.group(0)[: start - offset]
-                + rebase(reference)
-                + match.group(0)[end - offset :]
-            )
-
-        _, fenced = fenced_lines(content)
-        lines = content.splitlines(keepends=True)
-        patterns = (
-            r'`+[^`]*`+|!?\[[^\]]*\]\(\s*<?(?P<path>[^)\s">]+)>?(?:\s+"[^"]*")?\)',
-            r"""`+[^`]*`+|<(?:img|a|source|video|audio)\b[^>]*?\b(?:src|href|poster)=["'](?P<path>[^"']+)["']""",
+        spans = source_reference_spans(
+            content, html=source_file.suffix.lower() in {".html", ".htm"}
         )
-        for i, line in enumerate(lines):
-            if fenced[i] or line.startswith(("    ", "\t")):
-                continue
-            for pattern in patterns:
-                line = re.sub(pattern, replace, line, flags=re.IGNORECASE)
-            lines[i] = line
-        return "".join(lines)
+        for start, end in reversed(spans):
+            content = content[:start] + rebase(content[start:end]) + content[end:]
+        return content
 
     def _source_page_destination(self, source: Path) -> Path | None:
         """
@@ -799,6 +781,10 @@ class GreatDocs:
         roots: list[tuple[Path, Path, bool]] = []
         guide = self._find_user_guide_dir()
         if guide is not None:
+            if self._config.homepage == "user_guide":
+                info = self._discover_user_guide()
+                if info and info["files"] and source == info["files"][0]["path"].resolve():
+                    return self.build_dir / "index.qmd"
             roots.append(
                 (guide, self.build_dir / "user-guide", not self._config.user_guide_is_explicit)
             )
@@ -5828,7 +5814,8 @@ class GreatDocs:
 
             # Expand {{< code-include >}} shortcodes before Quarto sees the file
             content = self._expand_code_includes(content, src_path.parent)
-            content = self._rebase_source_references(content, src_path, dst_path)
+            reference_destination = self._source_page_destination(src_path.resolve()) or dst_path
+            content = self._rebase_source_references(content, src_path, reference_destination)
 
             # In auto-discovery mode, fix links to .qmd files with numeric prefixes
             if not is_explicit:
