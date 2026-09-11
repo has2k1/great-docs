@@ -143,6 +143,14 @@ def test_include_reference_inside_fenced_example_is_not_a_blocker(tmp_path: Path
     assert not blockers
 
 
+def test_include_reference_inside_raw_html_fence_is_still_checked(tmp_path: Path) -> None:
+    text = "```{=html}\n{{< include missing.qmd >}}\n```\n"
+    _, _, _, blockers = rewrite_document(
+        text, tmp_path / "index.qmd", (Move(tmp_path / "index.qmd", tmp_path / "docs/index.qmd"),)
+    )
+    assert any("missing.qmd" in message for message in blockers)
+
+
 def test_include_reference_to_untouched_file_is_rewritten_not_blocked(tmp_path: Path) -> None:
     (tmp_path / "CONTRIBUTING.md").write_text("# Contributing\n")
     guide = tmp_path / "user_guide"
