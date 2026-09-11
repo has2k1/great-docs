@@ -193,19 +193,20 @@ def cli():
 )
 @_config_option
 def init(project_path: str | None, force: bool, config_path: str | None = None) -> None:
-    """Initialize great-docs in your project (one-time bootstrap).
+    """
+    Initialise documentation in your project
 
-    Creates a fresh 'great-docs.yml' configuration file with discovered
+    Creates a fresh 'docs/great-docs.yml' configuration file with discovered
     package exports and sensible defaults. Refuses to run if
-    'great-docs.yml' already exists (use '--force' to reset).
+    the selected configuration already exists (use '--force' to reset).
 
     \b
-    • Creates 'great-docs.yml' with discovered API exports
+    • Creates 'docs/great-docs.yml' with discovered API exports
     • Auto-detects your package name and public API
     • Updates .gitignore to exclude the build directory
     • Detects docstring style (numpy, google, sphinx)
 
-    After init, customize 'great-docs.yml' then use 'great-docs build'
+    After init, customise 'docs/great-docs.yml' then use 'great-docs build'
     for all subsequent builds. You should never need to run
     'great-docs init' again unless you want to completely reset your
     configuration.
@@ -269,7 +270,7 @@ def init(project_path: str | None, force: bool, config_path: str | None = None) 
     "--output-dir",
     type=click.Path(file_okay=False, dir_okay=True),
     default=None,
-    help="Where to copy the built site when using --from-repo (default: ./great-docs/_site)",
+    help="Where to copy --from-repo output (default: the checkout deployment path, e.g. docs/_site)",
 )
 @click.option(
     "--shallow",
@@ -296,14 +297,16 @@ def build(
     preview_after: bool,
     config_path: str | None = None,
 ) -> None:
-    """Build your documentation site.
+    """
+    Build your documentation site
 
-    Requires 'great-docs.yml' to exist (run 'great-docs init' first).
+    Requires a configuration such as 'docs/great-docs.yml' (run 'great-docs init' first).
     This is the only command you need day-to-day and in CI.
 
-    Creates the 'great-docs/' build directory, copies all assets,
-    and builds the documentation site. The build directory is ephemeral and
-    should not be committed to version control.
+    Creates the 'docs/_quarto/default/' Quarto project, copies assets,
+    and publishes the site to 'docs/_site/'. Historical projects use
+    'docs/_quarto/<tag>/'. These generated directories should not be committed.
+    Use '--config website/great-docs.yml' for a custom source directory.
 
     Use '--project-path' to point to a project in a different directory.
     Use '--watch' to automatically rebuild when source files change.
@@ -318,7 +321,8 @@ def build(
     Use '--from-repo' to build documentation from a remote Git repository.
     This clones the repo into a temporary directory, creates an isolated
     virtual environment, installs the package and great-docs, builds the
-    site, and copies the output to '--output-dir' (or './great-docs/_site').
+    site, and copies the output to '--output-dir'. By default it preserves the
+    checkout's deployment path under the current directory, such as 'docs/_site/'.
 
     Add '--preview' to automatically start a local server after a
     '--from-repo' build completes, opening the site in your browser.
@@ -399,15 +403,16 @@ def build(
 )
 @_config_option
 def uninstall(project_path: str | None, config_path: str | None = None) -> None:
-    """Remove great-docs from your project.
+    """
+    Remove documentation configuration and generated output
 
     This command removes the great-docs configuration and build directory:
 
     \b
-    • Deletes the 'great-docs.yml' configuration file
-    • Removes the 'great-docs/' build directory
+    • Deletes the selected configuration, normally 'docs/great-docs.yml'
+    • Removes its generated Quarto projects and deployment output
 
-    Your source files ('user_guide/', 'README.md', etc.) are preserved.
+    Your source files ('docs/user_guide/', 'README.md', etc.) are preserved.
 
     \b
     Examples:
@@ -496,13 +501,14 @@ def preview(
     env_file: str | None,
     config_path: str | None = None,
 ) -> None:
-    """Preview your documentation locally.
+    """
+    Preview your documentation locally
 
     Starts a local HTTP server and opens the built documentation site in your
     default browser. If the site hasn't been built yet, it will build it first.
 
-    The site is served from 'great-docs/_site/'. Use 'great-docs build' to
-    rebuild if you've made changes.
+    The default site is served from 'docs/_site/'. Use '--config' to select a
+    custom documentation directory. Run 'great-docs build' after source changes.
 
     Use '--site-dir' to preview a site from any directory (e.g. output from
     a '--from-repo' build).
@@ -600,14 +606,15 @@ def preview(
 )
 @_config_option
 def config(project_path: str | None, force: bool, config_path: str | None = None) -> None:
-    """Generate a great-docs.yml configuration file.
+    """
+    Generate a documentation configuration file
 
-    Creates a 'great-docs.yml' file with all available options documented.
+    Creates 'docs/great-docs.yml' with all available options documented.
     The generated file contains commented examples for each setting.
 
     \b
     Examples:
-      great-docs config                     # Generate in current directory
+      great-docs config                     # Generate docs/great-docs.yml
       great-docs config --force             # Overwrite existing file
       great-docs config --project-path ../pkg
     """
@@ -1137,7 +1144,7 @@ def _freeze_info(project_root: Path, persist_dir: Path, layout: Layout | None = 
     "--freeze-dir",
     type=str,
     default=None,
-    help="Where to persist _freeze/ (default: project root '_freeze/')",
+    help="Where to persist execution results (default: '_freeze/' beside the selected configuration)",
 )
 @click.option(
     "--clean",
@@ -1160,14 +1167,15 @@ def freeze(
     info: bool,
     config_path: str | None = None,
 ) -> None:
-    """Execute specific pages and persist their freeze cache.
+    """
+    Execute specific pages and persist their freeze cache
 
     Renders one or more QMD pages (always executing their code), then copies
     the resulting '_freeze/' entries back to a persistent location so they
     survive future builds.
 
     PAGES are paths to .qmd files relative to your project root (e.g.,
-    'user_guide/benchmarks.qmd'). Quarto always executes code when rendering
+    'docs/user_guide/benchmarks.qmd'). Quarto always executes code when rendering
     individual files, even with freeze enabled (this is how you update
     frozen outputs).
 
@@ -1181,10 +1189,10 @@ def freeze(
 
     \b
     Examples:
-      great-docs freeze user_guide/benchmarks.qmd
-      great-docs freeze user_guide/benchmarks.qmd user_guide/mcmc-demo.qmd
-      great-docs freeze user_guide/benchmarks.qmd --freeze-dir docs/_freeze
-      great-docs freeze user_guide/benchmarks.qmd --clean
+      great-docs freeze docs/user_guide/benchmarks.qmd
+      great-docs freeze docs/user_guide/benchmarks.qmd docs/user_guide/mcmc-demo.qmd
+      great-docs freeze docs/user_guide/benchmarks.qmd --freeze-dir cached-results
+      great-docs freeze docs/user_guide/benchmarks.qmd --clean
       great-docs freeze --info
     """
     import shutil
@@ -1245,7 +1253,7 @@ def freeze(
 
     for page in pages:
         # Find the page's location in the build directory
-        # Pages from user_guide/ are copied into great-docs/user-guide/
+        # Match authored pages to their generated user-guide paths.
         # Numeric prefixes are stripped (e.g., 24-freeze-demo.qmd -> freeze-demo.qmd)
         page_path = Path(page)
         qmd_name = page_path.name
@@ -1369,7 +1377,7 @@ def _find_build_timing(
         candidate = output_dir / "build-timings.json"
         if candidate.exists():
             return candidate
-    # Multi-version: built into great-docs/_site/
+    # Prefer the selected layout's assembled deployment output.
     layout = Layout.make(project_path, Path(config_path) if config_path else None)
     candidate = layout.site_dir / "build-timings.json"
     if candidate.exists():
