@@ -1,0 +1,193 @@
+import io
+from pathlib import Path
+
+import pytest
+from yaml12 import read_yaml
+
+from great_docs._layout_migration.content import rewrite_config, rewrite_document
+from great_docs._layout_migration.model import MigrationError, Move
+
+
+def test_rebase_preserves_yaml_comment(tmp_path: Path) -> None:
+    original = "# Shared citations\nbibliography: refs.bib  # Keep here\n"
+    assert rewrite_config(original, (), tmp_path, tmp_path / "docs") == (
+        "# Shared citations\nbibliography: ../refs.bib  # Keep here\n"
+    )
+
+
+@pytest.mark.parametrize("destination", ["docs", "website/reference"])
+def test_config_changes_only_path_spans(tmp_path: Path, destination: str) -> None:
+    text = (
+        "# Citations café\r\nbibliography: ['refs.bib', \"other.bib\"] # Keep\r\n"
+        "csl: 'style.csl'\r\nuser_guide: guides\r\n"
+        "sections: [{dir: essays, title: Essays}]\r\n"
+        "custom_pages: [{dir: pages, output: info}]\r\n"
+        "site: {css: [theme.css, 'https://example.org/style.css'], toc: true}\r\n"
+        "source: {path: src/pkg}\r\nrepo: https://example.org/repo\r\n"
+    )
+    dest = tmp_path / destination
+    moves = tuple(Move(tmp_path / name, dest / name) for name in ("guides", "essays", "pages"))
+    result = rewrite_config(text, moves, tmp_path, dest)
+    prefix = "../" * len(Path(destination).parts)
+    expected = text
+    for path in ("refs.bib", "other.bib", "style.csl", "theme.css"):
+        expected = expected.replace(path, prefix + path)
+    assert result == expected
+
+
+def test_config_preserves_guide_ordering_and_url_fields(tmp_path: Path) -> None:
+    text = (
+        "user_guide:\n  - title: Start\n    contents:\n      - href: intro.qmd\n"
+        "logo: {light: logo.svg, href: ../home, show_title: false}\n"
+        "hero: {logo: false}\nfavicon: https://example.org/icon.png\n"
+        "custom_pages: false\nsite_url: https://example.org\n"
+        "announcement: {url: local.html}\nrobots: {disallow: [/secret]}\n"
+    )
+    assert rewrite_config(text, (), tmp_path, tmp_path / "docs") == text.replace(
+        "light: logo.svg", "light: ../logo.svg"
+    )
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "pre_render: script.py",
+        "freeze: {pre_render: [script.py]}",
+        "include_in_header: [{file: script.py}, {text: literal}]",
+        "skill: {file: script.py, extra_body: script.py, skills: [{file: script.py}]}",
+        "favicon: {icon: script.py, apple_touch: script.py, og_image: script.py}",
+        "hero: {logo: {dark: script.py}}",
+        "social_cards: {image: script.py}",
+        "authors: [{name: Ada, image: script.py}]",
+        "team_author: {image: script.py}",
+        "custom_pages: [script.py, {dir: script.py, output: keep}]",
+    ],
+)
+def test_all_documented_path_forms(tmp_path: Path, field: str) -> None:
+    assert rewrite_config(field, (), tmp_path, tmp_path / "docs") == field.replace(
+        "script.py", "../script.py"
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "bibliography: &refs refs.bib\nother: *refs\n",
+        "other: &refs refs.bib\nbibliography: *refs\n",
+        "site: &style {css: theme.css}\nother: *style\n",
+        "bibliography: !!str refs.bib\n",
+        "bibliography: |\n  refs.bib\n",
+        "bibliography: refs.bib\nbibliography: other.bib\n",
+        "? [complex, key]\n: value\n",
+        "bibliography: refs.bib\n---\ncsl: style.csl\n",
+    ],
+)
+def test_rejects_unsafe_yaml_spans(tmp_path: Path, text: str) -> None:
+    with pytest.raises(MigrationError):
+        rewrite_config(text, (), tmp_path, tmp_path / "docs")
+
+
+def test_replacement_quotes_yaml_indicators(tmp_path: Path) -> None:
+    dest = tmp_path / "docs"
+    moves = (Move(tmp_path / "refs.bib", dest / "x: #refs.bib"),)
+    result = rewrite_config("bibliography: refs.bib # End\n", moves, tmp_path, dest)
+    assert read_yaml(io.StringIO(result)) == {"bibliography": "x: #refs.bib"}
+    assert result.endswith(" # End\n")
+
+
+def test_markdown_preserves_examples_titles_and_fragments(tmp_path: Path) -> None:
+    guide = tmp_path / "user_guide"
+    guide.mkdir()
+    (tmp_path / "image name.png").write_bytes(b"image")
+    (guide / "next.qmd").write_text("# Next\n")
+    path = guide / "page.qmd"
+    text = (
+        "![A](<../image name.png?size=2#top> 'Title')\r\n"
+        "[Next](next.qmd#part) and [web](https://example.org) and [here](#part)\r\n"
+        '[image]: ../image%20name.png "Caption"\r\n'
+        "`[example](../missing.png)`\r\n"
+        "~~~markdown\r\n![sample](../missing.png)\r\n~~~\r\n"
+        "\r\n    ![indented](../missing.png)\r\n"
+    )
+    result, inputs, follow_up, blockers = rewrite_document(
+        text, path, (Move(guide, tmp_path / "docs/user_guide"),)
+    )
+    assert result == text.replace("../image", "../../image")
+    assert tmp_path / "image name.png" in inputs
+    assert not follow_up
+    assert not blockers
+
+
+def test_static_html_and_unrecognised_dynamic_references(tmp_path: Path) -> None:
+    page = tmp_path / "index.qmd"
+    (tmp_path / "logo.svg").write_text("<svg/>")
+    text = '<img src="logo.svg#x">\n{{< include extra.qmd >}}\n```{python}\nopen("x")\n```\n'
+    result, inputs, follow_up, blockers = rewrite_document(
+        text, page, (Move(page, tmp_path / "docs/index.qmd"),)
+    )
+    assert result.startswith('<img src="../logo.svg#x">')
+    assert tmp_path / "logo.svg" in inputs
+    assert any("dynamic" in message.lower() for message in follow_up)
+    assert any("include" in message.lower() for message in blockers)
+
+
+def test_broken_static_target_blocks(tmp_path: Path) -> None:
+    page = tmp_path / "index.md"
+    _, _, _, blockers = rewrite_document(
+        "![Missing](missing.png)", page, (Move(page, tmp_path / "docs/index.md"),)
+    )
+    assert any("missing.png" in message for message in blockers)
+
+
+def test_moved_link_target_is_rebased_for_retained_page(tmp_path: Path) -> None:
+    guide = tmp_path / "guide"
+    guide.mkdir()
+    (guide / "page.md").write_text("# Page")
+    result, _, _, blockers = rewrite_document(
+        "[Page](guide/page.md)", tmp_path / "README.md", (Move(guide, tmp_path / "docs/guide"),)
+    )
+    assert result == "[Page](docs/guide/page.md)"
+    assert not blockers
+
+
+def test_config_paths_are_literal_filesystem_names(tmp_path: Path) -> None:
+    text = "bibliography: 'refs#part%20one.bib'\n"
+    assert rewrite_config(text, (), tmp_path, tmp_path / "docs") == (
+        "bibliography: '../refs#part%20one.bib'\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "# Configuration\n",
+        "---\nmodule: sample\n...\n",
+        "module: sample\nhero: {}\n",
+        "hero: null # Auto\n",
+        "hero:\n  tagline: Simple\nmodule: sample\n",
+    ],
+)
+def test_implicit_input_insertions_preserve_other_yaml(tmp_path: Path, text: str) -> None:
+    from great_docs._layout_migration.content import set_config_values
+
+    expected = read_yaml(io.StringIO(text)) or {}
+    hero = expected.get("hero") or {}
+    hero["logo"] = {"light": "logo.svg", "dark": "logo.svg"}
+    expected["hero"] = hero
+    result = set_config_values(text, {("hero", "logo"): {"light": "logo.svg", "dark": "logo.svg"}})
+    assert read_yaml(io.StringIO(result)) == expected
+    if "# Auto" in text:
+        assert "# Auto" in result
+
+
+def test_link_to_html_resolves_a_moved_quarto_source(tmp_path: Path) -> None:
+    guide = tmp_path / "user_guide"
+    guide.mkdir()
+    (guide / "next.qmd").write_text("# Next")
+    result, _, _, blockers = rewrite_document(
+        "[Next](user_guide/next.html#part)",
+        tmp_path / "README.md",
+        (Move(guide, tmp_path / "docs/user_guide"),),
+    )
+    assert result == "[Next](docs/user_guide/next.html#part)"
+    assert not blockers
