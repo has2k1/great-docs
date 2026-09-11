@@ -546,19 +546,21 @@ def _gather_prose(
         if docstring:
             prose[item.name] = docstring
 
-    source_dir = layout.source_dir if layout is not None else project_root
-    for dirpath, dirnames, filenames in os.walk(source_dir):
+    for dirpath, dirnames, filenames in os.walk(project_root):
         here = Path(dirpath)
         # Prune rather than filter afterwards. Quarto renders no path beginning
         # with an underscore, so those pages carry no reference the site can show,
-        # and a nested `great-docs.yml` marks a separate documentation project,
-        # whose pages are checked against its own names rather than ours.
+        # and another project's `great-docs.yml` marks pages that must be
+        # checked against that project's names. Keep the selected source root.
         dirnames[:] = [
             d
             for d in dirnames
             if not d.startswith((".", "_"))
             and d not in _NOT_AUTHORED
-            and not (here / d / "great-docs.yml").exists()
+            and (
+                (layout is not None and here / d == layout.source_dir)
+                or not (here / d / "great-docs.yml").exists()
+            )
             and not is_in_great_docs_build_dir(
                 (here / d).relative_to(project_root).parts, project_root, layout
             )
@@ -890,8 +892,7 @@ def _check_stale_versions(
     # Ignore generated build copies at the project root. Nested directories
     # with similar names remain part of the user's source tree.
     qmd_files = []
-    source_dir = layout.source_dir if layout is not None else project_root
-    for qmd in source_dir.rglob("*.qmd"):
+    for qmd in project_root.rglob("*.qmd"):
         rel = qmd.relative_to(project_root)
         parts = rel.parts
         if any(p.startswith("_") or p.startswith(".") for p in parts):
