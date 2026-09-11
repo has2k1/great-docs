@@ -654,7 +654,12 @@ def preprocess_version(
     if upcoming_pages:
         _update_page_status_json(dest_dir, upcoming_pages)
 
-    return included_pages
+    # Historical API rebuilding can remove pages collected before introspection.
+    return [
+        page
+        for page in dict.fromkeys(included_pages)
+        if any((dest_dir / page).with_suffix(suffix).is_file() for suffix in (".qmd", ".md"))
+    ]
 
 
 def _compute_excluded_section_dirs(

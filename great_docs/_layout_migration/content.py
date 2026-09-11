@@ -276,7 +276,11 @@ def set_config_values(text: str, updates: dict[ConfigPath, Any]) -> str:
 
 
 def rewrite_document(
-    text: str, source: Path, moves: tuple[Move, ...]
+    text: str,
+    source: Path,
+    moves: tuple[Move, ...],
+    *,
+    generated_homepage: Path | None = None,
 ) -> tuple[str, tuple[Path, ...], tuple[str, ...], tuple[str, ...]]:
     """
     Rebase static document destinations against their original source targets
@@ -303,6 +307,13 @@ def rewrite_document(
         try:
             check_symlinks(source.parent / unquote(url.path))
             check_symlinks(target)
+            if (
+                generated_homepage is not None
+                and target in {generated_homepage, generated_homepage.with_suffix(".html")}
+                and not target.exists()
+            ):
+                # The README-backed homepage keeps its published identity after relocation.
+                continue
             if not target.exists() and target.suffix.lower() == ".html":
                 candidates = [target.with_suffix(suffix) for suffix in (".qmd", ".md")]
                 matches = [candidate for candidate in candidates if candidate.is_file()]
