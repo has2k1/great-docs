@@ -48,9 +48,10 @@ def fingerprint(path: Path) -> str:
     Hash bytes, modes, and the complete directory inventory without following links
 
     Include missing paths and symlink targets as distinct states. Directory
-    digests include every descendant name and state in sorted order, so added
-    or removed files invalidate a preview. Ignore timestamps. Propagate read
-    errors so callers cannot accept an incomplete inventory.
+    digests include every descendant's full relative path and state in sorted
+    order, so changed hierarchy, added files, and removed files invalidate a
+    preview. Ignore timestamps. Propagate read errors so callers cannot accept
+    an incomplete inventory.
     """
     digest = hashlib.sha256()
 
@@ -59,6 +60,7 @@ def fingerprint(path: Path) -> str:
         digest.update(value)
 
     def visit(item: Path) -> None:
+        add(os.fsencode(item.relative_to(path).as_posix()))
         try:
             mode = item.lstat().st_mode
         except FileNotFoundError:
@@ -74,7 +76,6 @@ def fingerprint(path: Path) -> str:
                 raise MigrationError(f"Cannot fingerprint {item}: {error}") from error
         elif stat.S_ISDIR(mode):
             for child in sorted(item.iterdir()):
-                add(os.fsencode(child.name))
                 visit(child)
         else:
             raise MigrationError(f"Unsupported filesystem input: {item}")

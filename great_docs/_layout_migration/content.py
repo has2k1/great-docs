@@ -22,6 +22,9 @@ from great_docs._source_refs import source_reference_spans
 from .model import MigrationError, Move, absolute_path, check_symlinks, moved_path
 
 ConfigPath = tuple[str | int, ...]
+_GENERATED_REFERENCE = re.compile(
+    r"(?:\.\.?/)*reference/[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\.(?:html|qmd)\Z"
+)
 _PATH_FIELDS = (
     ("user_guide",),
     ("sections", "*", "dir"),
@@ -306,11 +309,16 @@ def rewrite_document(
                 if len(matches) == 1:
                     input_target = matches[0]
                     check_symlinks(input_target)
+                elif not matches and _GENERATED_REFERENCE.fullmatch(unquote(url.path)):
+                    continue
                 else:
                     raise MigrationError(
                         f"Cannot resolve rendered page reference in {source}: {value}"
                     )
             if not input_target.exists():
+                # Generated API pages have published identities but no repository source.
+                if _GENERATED_REFERENCE.fullmatch(unquote(url.path)):
+                    continue
                 raise MigrationError(f"Broken reference in {source}: {value}")
         except (OSError, MigrationError) as error:
             blockers.append(str(error))

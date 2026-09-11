@@ -191,3 +191,42 @@ def test_link_to_html_resolves_a_moved_quarto_source(tmp_path: Path) -> None:
     )
     assert result == "[Next](docs/user_guide/next.html#part)"
     assert not blockers
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        "reference/sample.api.html",
+        "reference/sample.api.qmd",
+        "../reference/sample.api.qmd",
+        "../../reference/sample.api.html",
+    ],
+)
+def test_generated_reference_page_keeps_published_identity(tmp_path: Path, reference: str) -> None:
+    page = tmp_path / "user_guide/page.qmd"
+    text = f"[API]({reference}?view=full#usage)"
+    result, inputs, _, blockers = rewrite_document(
+        text, page, (Move(page.parent, tmp_path / "docs/user_guide"),)
+    )
+    assert result == text
+    assert not inputs
+    assert not blockers
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        "reference/missing.png",
+        "elsewhere/missing.html",
+        "elsewhere/missing.qmd",
+        "images/reference/missing.html",
+    ],
+)
+def test_generated_page_recognition_keeps_missing_input_checks(
+    tmp_path: Path, reference: str
+) -> None:
+    page = tmp_path / "index.qmd"
+    _, _, _, blockers = rewrite_document(
+        f"[Missing]({reference})", page, (Move(page, tmp_path / "docs/index.qmd"),)
+    )
+    assert any(reference in message for message in blockers)
