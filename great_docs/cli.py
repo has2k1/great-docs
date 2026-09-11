@@ -1212,21 +1212,30 @@ def freeze(
         click.echo("Error: Specify at least one PAGE, or use --info.", err=True)
         sys.exit(1)
 
-    # --clean: wipe existing cache
+    missing = [p for p in pages if not (project_root / p).is_file()]
+    if missing:
+        for page in missing:
+            click.echo(f"Error: Page not found: {page}", err=True)
+        sys.exit(1)
+
     if clean:
+        from ._utils import validate_layout_outputs, validate_tree_symlinks
+
+        try:
+            validate_layout_outputs(layout)
+            for cache in (persist_dir, build_dir / "_freeze"):
+                absolute = Path(os.path.abspath(cache))
+                if any(parent.is_symlink() for parent in absolute.parents):
+                    raise ValueError(f"Freeze cache has a symlink parent: {cache}")
+                validate_tree_symlinks(absolute)
+        except ValueError as error:
+            raise click.ClickException(str(error)) from error
         if persist_dir.exists():
             shutil.rmtree(persist_dir)
             click.echo(f"Cleaned {os.path.relpath(persist_dir, project_root)}/")
         build_freeze = build_dir / "_freeze"
         if build_freeze.exists():
             shutil.rmtree(build_freeze)
-
-    # Validate pages exist
-    missing = [p for p in pages if not (project_root / p).is_file()]
-    if missing:
-        for m in missing:
-            click.echo(f"Error: Page not found: {m}", err=True)
-        sys.exit(1)
 
     # Always re-prepare the build directory so file hashes match what a full
     # build would produce (frontmatter normalization, tag expansion, etc.).
@@ -2541,6 +2550,19 @@ def seo(
             click.echo("Error: Site not built. Run 'great-docs build' first.", err=True)
             sys.exit(1)
 
+        separate_site = docs.layout.source_dir != docs.layout.package_root
+        if fix and separate_site:
+            from ._utils import validate_site_dir
+
+            validate_site_dir(site_dir)
+            ownership_path = site_dir / ".great-docs-site.json"
+            ownership = json.loads(ownership_path.read_text(encoding="utf-8"))
+
+        def record_generated_file(name: str) -> None:
+            if separate_site and (site_dir / name).is_file():
+                ownership["paths"] = sorted(set(ownership["paths"]) | {name})
+                ownership_path.write_text(json.dumps(ownership, indent=2) + "\n", encoding="utf-8")
+
         issues = []
         warnings = []
         info = []
@@ -2564,6 +2586,7 @@ def seo(
             issues.append("❌ sitemap.xml not found")
             if fix:
                 docs._generate_sitemap_xml()
+                record_generated_file("sitemap.xml")
                 info.append("   → Generated sitemap.xml")
 
         # ── Check robots.txt ─────────────────────────────────────────────
@@ -2580,6 +2603,7 @@ def seo(
             issues.append("❌ robots.txt not found")
             if fix:
                 docs._generate_robots_txt()
+                record_generated_file("robots.txt")
                 info.append("   → Generated robots.txt")
 
         # ── Check HTML pages ─────────────────────────────────────────────

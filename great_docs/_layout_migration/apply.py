@@ -75,9 +75,10 @@ def _target(root: Path, relative: str, *, journal: bool = False) -> Path:
     return result
 
 
-def _verify(path: Path, expected: str) -> None:
-    check_symlinks(path)
-    if path.is_dir():
+def _verify(path: Path, expected: str, *, read_only_external: bool = False) -> None:
+    if not read_only_external:
+        check_symlinks(path)
+    if path.is_dir() and not path.is_symlink():
         tree_files(path)
     if fingerprint(path) != expected:
         raise MigrationError(f"Migration input changed; request a fresh preview: {path}")
@@ -104,7 +105,7 @@ def _validate(migration: Migration) -> None:
     for path, expected in reviewed.items():
         if not path.is_absolute() or ".." in path.parts:
             raise MigrationError(f"Invalid reviewed path: {path}")
-        _verify(path, expected)
+        _verify(path, expected, read_only_external=not path.is_relative_to(root))
     sources = [move.source for move in migration.moves]
     destinations = [move.destination for move in migration.moves]
     for index, move in enumerate(migration.moves):

@@ -22,6 +22,58 @@ from great_docs.cli import (
 )
 
 
+@pytest.mark.parametrize("unsafe", ["container", "build", "persistent", "parent", "child", "unowned"])
+def test_freeze_clean_rejects_unsafe_paths_before_removing_cache(
+    tmp_path: Path, unsafe: str
+) -> None:
+    from great_docs._utils import QUARTO_YML_HEADER
+
+    source = tmp_path / "docs"
+    source.mkdir()
+    (source / "great-docs.yml").write_text("display_name: Demo\n")
+    (source / "page.qmd").write_text("# Page\n")
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    keep = unrelated / "keep.txt"
+    keep.write_bytes(b"unrelated cache\x00")
+    persistent = source / "_freeze"
+    persistent.mkdir()
+    persistent_keep = persistent / "keep.txt"
+    persistent_keep.write_bytes(b"persistent cache\x00")
+    build = source / "_quarto/default"
+    build.mkdir(parents=True)
+    (build / "_quarto.yml").write_text(QUARTO_YML_HEADER)
+    build_cache = build / "_freeze"
+    build_cache.mkdir()
+    (build_cache / "keep.txt").write_bytes(b"build cache\x00")
+    args = ["freeze", "docs/page.qmd", "--clean", "--project-path", str(tmp_path)]
+    if unsafe == "container":
+        build.parent.rename(unrelated / "projects")
+        (source / "_quarto").symlink_to(unrelated / "projects", target_is_directory=True)
+    elif unsafe == "build":
+        build.rename(unrelated / "project")
+        build.symlink_to(unrelated / "project", target_is_directory=True)
+    elif unsafe == "persistent":
+        persistent.rename(unrelated / "cache")
+        persistent.symlink_to(unrelated / "cache", target_is_directory=True)
+    elif unsafe == "parent":
+        (unrelated / "cache").mkdir()
+        (unrelated / "cache/keep.txt").write_bytes(b"external cache\x00")
+        (source / "cache-link").symlink_to(unrelated, target_is_directory=True)
+        args.extend(["--freeze-dir", str(source / "cache-link/cache")])
+    elif unsafe == "child":
+        (persistent / "linked").symlink_to(unrelated, target_is_directory=True)
+    else:
+        (build / "_quarto.yml").write_text("project:\n  type: website\n")
+    before = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+
+    result = CliRunner().invoke(cli, args)
+
+    assert result.exit_code != 0
+    assert keep.read_bytes() == b"unrelated cache\x00"
+    assert all(path.is_file() and path.read_bytes() == content for path, content in before.items())
+
+
 def test_preview_does_not_move_config(tmp_path: Path) -> None:
     config = tmp_path / "great-docs.yml"
     config.write_text("display_name: Demo\n")
@@ -33,6 +85,21 @@ def test_preview_does_not_move_config(tmp_path: Path) -> None:
     assert "docs/great-docs.yml" in result.output
     assert config.read_text() == "display_name: Demo\n"
     assert not (tmp_path / "docs").exists()
+
+
+def test_freeze_clean_preserves_cache_when_page_is_missing(tmp_path: Path) -> None:
+    cache = tmp_path / "_freeze"
+    cache.mkdir()
+    saved = cache / "result.json"
+    saved.write_bytes(b"cache\x00")
+
+    result = CliRunner().invoke(
+        cli, ["freeze", "missing.qmd", "--clean", "--project-path", str(tmp_path)]
+    )
+
+    assert result.exit_code != 0
+    assert "Page not found" in result.output
+    assert saved.read_bytes() == b"cache\x00"
 
 
 @pytest.mark.parametrize("directory", [".", "docs"])
@@ -616,6 +683,34 @@ def test_seo_missing_alt_text(tmp_path, monkeypatch):
     )
     result = runner.invoke(cli, ["seo", "--project-path", "."])
     assert "alt" in result.output.lower() or "warning" in result.output.lower()
+
+
+@pytest.mark.parametrize("unknown", [False, True])
+def test_seo_fix_preserves_deployment_ownership(tmp_path: Path, unknown: bool) -> None:
+    from great_docs._utils import record_site_ownership, validate_site_dir
+
+    source = tmp_path / "docs"
+    source.mkdir()
+    (source / "great-docs.yml").write_text(
+        "seo:\n  sitemap: true\n  canonical:\n    base_url: https://example.com/\n"
+    )
+    site = source / "_site"
+    site.mkdir()
+    (site / "index.html").write_text("<html><head><title>Demo</title></head></html>")
+    record_site_ownership(site)
+    if unknown:
+        (site / "notes.txt").write_bytes(b"user notes\x00")
+    before = {path: path.read_bytes() for path in site.iterdir()}
+
+    result = CliRunner().invoke(cli, ["seo", "--fix", "--project-path", str(tmp_path)])
+
+    if unknown:
+        assert result.exit_code != 0
+        assert {path: path.read_bytes() for path in site.iterdir()} == before
+    else:
+        assert (site / "robots.txt").is_file()
+        assert (site / "sitemap.xml").is_file()
+        validate_site_dir(site)
 
 
 def test_seo_fix_missing_files(tmp_path, monkeypatch):

@@ -1,5 +1,6 @@
 import io
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -426,6 +427,169 @@ def test_already_migrated_is_noop(project: Path) -> None:
     assert not result.moves and not result.edits and not result.blockers
     assert any("already" in message.lower() for message in result.follow_up)
     assert snapshot(project) == before
+
+
+@pytest.fixture
+def isolated_git(project: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(project / "git-config"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(project / "xdg"))
+    subprocess.run(["git", "init", "-q", str(project)], check=True)
+    return project
+
+
+@pytest.mark.usefixtures("isolated_git")
+@pytest.mark.parametrize("cache", ["moved", "empty", "recovered"])
+@pytest.mark.parametrize("rules", ["/_freeze/\n", "/docs/_freeze/\n"])
+def test_migration_blocks_changed_freeze_ignore_policy(
+    project: Path, cache: str, rules: str
+) -> None:
+    subprocess.run(["git", "init", "-q", str(project)], check=True)
+    put(project, ".gitignore", rules)
+    if cache == "empty":
+        (project / "_freeze").mkdir()
+    elif cache == "moved":
+        put(project, "_freeze/result.json", b"cache\x00")
+    else:
+        put(project, "great-docs/_quarto.yml", QUARTO_YML_HEADER)
+        put(project, "great-docs/_freeze/result.json", b"cache\x00")
+    before = snapshot(project)
+
+    result = analyse(Layout.make(project), Path("docs"))
+
+    assert any("ignore policy" in message for message in result.blockers)
+    assert snapshot(project) == before
+
+
+@pytest.mark.usefixtures("isolated_git")
+@pytest.mark.parametrize("rules", ["", "_freeze/\n", "**/_freeze/*\n!**/_freeze/kept.json\n"])
+def test_migration_preserves_matching_freeze_ignore_policy(project: Path, rules: str) -> None:
+    from great_docs._layout_migration import apply
+
+    subprocess.run(["git", "init", "-q", str(project)], check=True)
+    put(project, ".gitignore", rules)
+    put(project, "_freeze/result.json", b"cache\x00")
+    put(project, "_freeze/kept.json", b"tracked cache\x00")
+    subprocess.run(["git", "-C", str(project), "add", "-f", "_freeze/kept.json"], check=True)
+
+    result = analyse(Layout.make(project), Path("docs"))
+
+    assert not result.blockers
+    apply(result)
+    assert (project / "docs/_freeze/result.json").read_bytes() == b"cache\x00"
+    assert (project / "docs/_freeze/kept.json").read_bytes() == b"tracked cache\x00"
+    for name in ("result.json", "kept.json"):
+        statuses = [
+            subprocess.run(
+                ["git", "-C", str(project), "check-ignore", "--no-index", "-q", path],
+                check=False,
+            ).returncode
+            for path in (f"_freeze/{name}", f"docs/_freeze/{name}")
+        ]
+        assert statuses[0] == statuses[1]
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_migration_revalidates_freeze_ignore_inputs(project: Path) -> None:
+    from great_docs._layout_migration import MigrationError, apply
+
+    subprocess.run(["git", "init", "-q", str(project)], check=True)
+    put(project, "_freeze/result.json", b"cache\x00")
+    proposal = analyse(Layout.make(project), Path("docs"))
+    assert not proposal.blockers
+    put(project, ".git/info/exclude", "/docs/_freeze/\n")
+    before = snapshot(project)
+
+    with pytest.raises(MigrationError):
+        apply(proposal)
+
+    assert snapshot(project) == before
+
+
+@pytest.mark.usefixtures("isolated_git")
+@pytest.mark.parametrize("change", ["contents", "retarget", "remove", "ancestor"])
+def test_migration_revalidates_linked_external_ignore_policy(
+    project: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    change: str,
+) -> None:
+    from great_docs._layout_migration import MigrationError, apply
+
+    external = tmp_path_factory.mktemp("external-ignore")
+    policy = put(external, "policies/excludes", "")
+    link = external / "linked"
+    link.symlink_to(policy.parent, target_is_directory=True)
+    config = put(external, "config", f"[core]\nexcludesFile = {link / 'excludes'}\n")
+    config_link = external / "gitconfig"
+    config_link.symlink_to(config)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config_link))
+    put(project, "_freeze/result.json", b"cache\x00")
+    proposal = analyse(Layout.make(project), Path("docs"))
+    assert not proposal.blockers
+    if change == "contents":
+        policy.write_text("/docs/_freeze/\n")
+    elif change == "remove":
+        config_link.unlink()
+    elif change == "retarget":
+        config_link.unlink()
+        config_link.symlink_to(put(external, "other-config", config.read_bytes()))
+    else:
+        link.unlink()
+        alternative = external / "alternative"
+        alternative.mkdir()
+        put(alternative, "excludes", "")
+        link.symlink_to(alternative, target_is_directory=True)
+    before = snapshot(project)
+
+    with pytest.raises(MigrationError):
+        apply(proposal)
+
+    assert snapshot(project) == before
+
+
+def test_migration_freeze_policy_with_host_git_configuration(project: Path) -> None:
+    from great_docs._layout_migration import apply
+
+    subprocess.run(["git", "init", "-q", str(project)], check=True)
+    put(project, "_freeze/result.json", b"cache\x00")
+    proposal = analyse(Layout.make(project), Path("docs"))
+    assert not proposal.blockers
+
+    apply(proposal)
+
+    assert (project / "docs/_freeze/result.json").read_bytes() == b"cache\x00"
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_migration_revalidates_missing_included_git_config(
+    project: Path, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from great_docs._layout_migration import MigrationError, apply
+
+    external = tmp_path_factory.mktemp("included-ignore")
+    config = put(external, "config", "[include]\npath = extra-config\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    put(project, "_freeze/result.json", b"cache\x00")
+    proposal = analyse(Layout.make(project), Path("docs"))
+    assert not proposal.blockers
+    put(external, "extra-config", "[core]\nexcludesFile = changed-rules\n")
+    before = snapshot(project)
+
+    with pytest.raises(MigrationError):
+        apply(proposal)
+
+    assert snapshot(project) == before
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_migration_blocks_conditional_git_ignore_configuration(project: Path) -> None:
+    put(project, "git-config", '[includeIf "onbranch:future"]\npath = extra-config\n')
+    put(project, "_freeze/result.json", b"cache\x00")
+
+    proposal = analyse(Layout.make(project), Path("docs"))
+
+    assert any("conditional" in message for message in proposal.blockers)
 
 
 def test_freeze_move_preserves_bytes_and_generated_trees(project: Path) -> None:
