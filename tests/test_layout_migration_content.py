@@ -131,6 +131,32 @@ def test_static_html_and_unrecognised_dynamic_references(tmp_path: Path) -> None
     assert any("include" in message.lower() for message in blockers)
 
 
+def test_include_reference_inside_fenced_example_is_not_a_blocker(tmp_path: Path) -> None:
+    text = (
+        "Use the include shortcode like this:\n\n"
+        "```markdown{shortcodes=false}\n{{< include src/mypackage/examples/demo.py >}}\n```\n"
+    )
+    _, _, follow_up, blockers = rewrite_document(
+        text, tmp_path / "index.qmd", (Move(tmp_path / "index.qmd", tmp_path / "docs/index.qmd"),)
+    )
+    assert any("shortcode" in message.lower() for message in follow_up)
+    assert not blockers
+
+
+def test_include_reference_to_untouched_file_is_rewritten_not_blocked(tmp_path: Path) -> None:
+    (tmp_path / "CONTRIBUTING.md").write_text("# Contributing\n")
+    guide = tmp_path / "user_guide"
+    guide.mkdir()
+    page = guide / "page.qmd"
+    page.write_text("{{< include ../CONTRIBUTING.md >}}\n")
+    result, inputs, _, blockers = rewrite_document(
+        page.read_text(), page, (Move(guide, tmp_path / "docs/user_guide"),)
+    )
+    assert not blockers
+    assert tmp_path / "CONTRIBUTING.md" in inputs
+    assert result == "{{< include ../../CONTRIBUTING.md >}}\n"
+
+
 def test_broken_static_target_blocks(tmp_path: Path) -> None:
     page = tmp_path / "index.md"
     _, _, _, blockers = rewrite_document(
