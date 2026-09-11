@@ -102,6 +102,48 @@ def test_freeze_clean_preserves_cache_when_page_is_missing(tmp_path: Path) -> No
     assert saved.read_bytes() == b"cache\x00"
 
 
+def test_freeze_clean_rejects_parent_traversal_before_normalisation(tmp_path: Path) -> None:
+    source = tmp_path / "docs"
+    source.mkdir()
+    (source / "great-docs.yml").write_text("display_name: Demo\n")
+    (source / "page.qmd").write_text("# Page\n")
+    external = tmp_path / "external"
+    (external / "inner").mkdir(parents=True)
+    (external / "cache").mkdir()
+    saved = external / "cache/keep.txt"
+    saved.write_bytes(b"external cache\x00")
+    (source / "link").symlink_to(external / "inner", target_is_directory=True)
+    override = source / "link/../cache"
+
+    with patch("great_docs.cli.GreatDocs._prepare_for_freeze"):
+        result = CliRunner().invoke(
+            cli,
+            [
+                "freeze", "docs/page.qmd", "--clean", "--project-path", str(tmp_path),
+                "--freeze-dir", str(override),
+            ],
+        )
+
+    assert result.exit_code != 0
+    assert saved.read_bytes() == b"external cache\x00"
+
+
+def test_freeze_clean_accepts_ordinary_relative_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "page.qmd").write_text("# Page\n")
+    cache = tmp_path / "cached-results"
+    cache.mkdir()
+    (cache / "result.json").write_bytes(b"cache\x00")
+    with patch("great_docs.cli.GreatDocs._prepare_for_freeze") as prepare:
+        CliRunner().invoke(
+            cli, ["freeze", "page.qmd", "--clean", "--freeze-dir", "cached-results"]
+        )
+    prepare.assert_called_once()
+    assert not cache.exists()
+
+
 @pytest.mark.parametrize("directory", [".", "docs"])
 @pytest.mark.parametrize("mode", ["single", "versions", "watch", "preview", "preview-build"])
 def test_layout_notice_once_per_build_or_preview_session(

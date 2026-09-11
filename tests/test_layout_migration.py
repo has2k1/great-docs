@@ -462,7 +462,7 @@ def test_migration_blocks_changed_freeze_ignore_policy(
 
 
 @pytest.mark.usefixtures("isolated_git")
-@pytest.mark.parametrize("rules", ["", "_freeze/\n", "**/_freeze/*\n!**/_freeze/kept.json\n"])
+@pytest.mark.parametrize("rules", ["", "**/_freeze/*\n!**/_freeze/kept.json\n"])
 def test_migration_preserves_matching_freeze_ignore_policy(project: Path, rules: str) -> None:
     from great_docs._layout_migration import apply
 
@@ -487,6 +487,77 @@ def test_migration_preserves_matching_freeze_ignore_policy(project: Path, rules:
             for path in (f"_freeze/{name}", f"docs/_freeze/{name}")
         ]
         assert statuses[0] == statuses[1]
+
+
+@pytest.mark.usefixtures("isolated_git")
+@pytest.mark.parametrize("ignored", [False, True])
+def test_migration_preserves_forced_cache_tracking_or_refuses(project: Path, ignored: bool) -> None:
+    from great_docs._layout_migration import apply
+
+    rules = "_freeze/\n" if ignored else "/_freeze/\n/docs/_freeze/*\n!/docs/_freeze/kept.json\n"
+    put(project, ".gitignore", rules)
+    put(project, "_freeze/kept.json", b"tracked cache\x00")
+    subprocess.run(["git", "-C", str(project), "add", "-f", "_freeze/kept.json"], check=True)
+    proposal = analyse(Layout.make(project), Path("docs"))
+    if not ignored:
+        assert not proposal.blockers
+    if proposal.blockers:
+        assert any("tracked cache" in message for message in proposal.blockers)
+        assert (project / "_freeze/kept.json").read_bytes() == b"tracked cache\x00"
+        assert not (project / "docs/_freeze/kept.json").exists()
+        return
+
+    apply(proposal)
+    subprocess.run(["git", "-C", str(project), "add", "-A"], check=True)
+    tracked = subprocess.run(
+        ["git", "-C", str(project), "ls-files", "docs/_freeze/kept.json"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert tracked.strip() == "docs/_freeze/kept.json"
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_migration_revalidates_cache_tracking_index(project: Path) -> None:
+    from great_docs._layout_migration import MigrationError, apply
+
+    put(project, "_freeze/result.json", b"cache\x00")
+    proposal = analyse(Layout.make(project), Path("docs"))
+    assert not proposal.blockers
+    subprocess.run(["git", "-C", str(project), "add", "_freeze/result.json"], check=True)
+    before = snapshot(project)
+
+    with pytest.raises(MigrationError):
+        apply(proposal)
+
+    assert snapshot(project) == before
+
+
+@pytest.mark.usefixtures("isolated_git")
+def test_migration_revalidates_shared_cache_tracking_index(project: Path) -> None:
+    from great_docs._layout_migration import MigrationError, apply
+
+    put(project, "_freeze/result.json", b"cache\x00")
+    subprocess.run(["git", "-C", str(project), "add", "_freeze/result.json"], check=True)
+    subprocess.run(["git", "-C", str(project), "update-index", "--split-index"], check=True)
+    shared = subprocess.run(
+        ["git", "-C", str(project), "rev-parse", "--shared-index-path"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    shared_path = project / shared
+    proposal = analyse(Layout.make(project), Path("docs"))
+    assert not proposal.blockers
+    assert shared_path in dict(proposal.fingerprints)
+    shared_path.write_bytes(shared_path.read_bytes() + b"changed")
+    before = snapshot(project)
+
+    with pytest.raises(MigrationError):
+        apply(proposal)
+
+    assert snapshot(project) == before
 
 
 @pytest.mark.usefixtures("isolated_git")
