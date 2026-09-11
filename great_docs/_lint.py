@@ -540,6 +540,7 @@ def _gather_prose(
         The prose, keyed by the symbol or file it came from.
     """
     prose: dict[str, str] = {}
+    project_root = project_root.resolve()
 
     for item in items:
         docstring = _get_docstring(item.obj)
@@ -822,6 +823,7 @@ def _check_stale_versions(
     """
     from yaml12 import read_yaml
 
+    project_root = project_root.resolve()
     # Load great-docs.yml for versions list and optional lint config
     config_path = layout.config_path if layout is not None else project_root / "great-docs.yml"
     if not config_path.exists():
