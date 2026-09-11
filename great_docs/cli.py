@@ -5,14 +5,17 @@ import re
 import sys
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 import click
 
 from . import __version__
-from ._layout import Layout
+from ._layout import Layout, _find_package_root
 from ._subprocess import TEXT_MODE_KWARGS
 from .core import GreatDocs
+
+if TYPE_CHECKING:
+    from ._layout_migration import Migration
 
 
 def _config_option(function: Callable[..., Any]) -> Callable[..., Any]:
@@ -21,7 +24,7 @@ def _config_option(function: Callable[..., Any]) -> Callable[..., Any]:
     @click.option(
         "--config",
         "config_path",
-        type=click.Path(dir_okay=False),
+        type=str if function.__name__ == "migrate_layout" else click.Path(dir_okay=False),
         help="Path to the project configuration file",
     )
     @wraps(function)
@@ -29,7 +32,11 @@ def _config_option(function: Callable[..., Any]) -> Callable[..., Any]:
         standalone_preview = function.__name__ == "preview" and any(
             kwargs.get(option) for option in ("site_dir", "pr", "run", "branch", "clear_cache")
         )
-        if not kwargs.get("from_repo") and not standalone_preview:
+        if (
+            function.__name__ != "migrate_layout"
+            and not kwargs.get("from_repo")
+            and not standalone_preview
+        ):
             try:
                 Layout.make(
                     Path(kwargs.get("project_path") or Path.cwd()),
@@ -700,6 +707,152 @@ cli.add_command(preview)
 cli.add_command(uninstall)
 cli.add_command(config)
 cli.add_command(ci)
+
+
+def _print_migration(migration: Migration) -> None:
+    """Show every proposed move, file edit, and manual follow-up"""
+    import difflib
+
+    root = migration.package_root
+    for move in migration.moves:
+        click.echo(f"Move {move.source.relative_to(root)} to {move.destination.relative_to(root)}")
+    for edit in migration.edits:
+        path = str(edit.path.relative_to(root))
+        click.echo(f"{'Create' if edit.before is None else 'Update'} {path}")
+        try:
+            before = (edit.before or b"").decode("utf-8")
+            after = edit.after.decode("utf-8")
+        except UnicodeError:
+            click.echo(f"  Write {len(edit.after)} bytes; preserve the original for recovery.")
+        else:
+            for line in difflib.unified_diff(
+                before.splitlines(), after.splitlines(), fromfile=path, tofile=path, lineterm=""
+            ):
+                click.echo(line)
+    for item in migration.follow_up:
+        click.echo(item)
+    for blocker in migration.blockers:
+        click.echo(f"Blocked: {blocker}", err=True)
+
+
+@click.command(name="migrate-layout", hidden=True)
+@click.option(
+    "--project-path",
+    type=click.Path(exists=True, file_okay=False),
+    help="Path to the project root directory",
+)
+@click.option(
+    "--to",
+    "destination",
+    default="docs",
+    show_default=True,
+    help="Documentation directory relative to the package root",
+)
+@click.option("--dry-run", is_flag=True, help="Preview all changes without writing files")
+@click.option(
+    "--yes", is_flag=True, help="Apply the reviewed changes without an interactive confirmation"
+)
+@_config_option
+@click.pass_context
+def migrate_layout(
+    ctx: click.Context,
+    project_path: str | None,
+    destination: str,
+    dry_run: bool,
+    yes: bool,
+    config_path: str | None = None,
+) -> None:
+    """
+    Move root-layout documentation into docs/ or a custom directory
+
+    Preview source moves, configuration and ignore-file edits, cache treatment,
+    and manual follow-up before applying changes. Keep generated build trees.
+    Refuse conflicts and changed inputs even with --yes. Use --dry-run to inspect
+    the proposal without writes; it takes precedence over --yes.
+
+    Require affirmative terminal confirmation unless --yes is supplied. If a
+    previous migration was interrupted, show its recovery instructions and
+    refuse another migration until recovery is complete. A repeated invocation
+    with a matching --to or explicit --config reports that no migration is needed.
+    """
+    import shlex
+
+    from . import _layout_migration as migration_api
+    from ._layout_migration.content import read_config
+    from ._layout_migration.model import absolute_path, check_symlinks, moved_path
+
+    try:
+        root = _find_package_root(absolute_path(Path(project_path or Path.cwd())))
+        recovery = migration_api.recovery_instructions(root)
+        if recovery:
+            for instruction in recovery:
+                click.echo(instruction)
+            raise click.ClickException(
+                "Pending migration recovery must be completed before another migration."
+            )
+
+        if config_path:
+            check_symlinks(Path(config_path))
+        else:
+            for candidate in (root / "great-docs.yml", root / "docs/great-docs.yml"):
+                if candidate.is_file():
+                    check_symlinks(candidate)
+        layout = Layout.make(root, Path(config_path) if config_path else None)
+        target = root / destination
+        if (
+            layout.source_dir != root
+            and ctx.get_parameter_source("destination") == click.core.ParameterSource.DEFAULT
+        ):
+            target = layout.source_dir
+        check_symlinks(target)
+        target = absolute_path(target)
+        if target == root or not target.is_relative_to(root):
+            raise ValueError(f"The destination must be a descendant of the package root: {target}")
+
+        if not config_path and not layout.config_path.is_file():
+            candidate = target / "great-docs.yml"
+            check_symlinks(candidate)
+            layout = Layout.make(root, candidate)
+        read_config(layout.config_path.read_bytes().decode("utf-8"))
+
+        migration = migration_api.analyse(layout, target)
+        _print_migration(migration)
+        if migration.blockers:
+            raise click.ClickException("Migration has blocking conflicts.")
+        if not migration.moves and not migration.edits:
+            click.echo("No migration is needed.")
+            return
+        if dry_run:
+            click.echo("Dry run complete; no files changed.")
+            return
+        if not yes:
+            if not sys.stdin.isatty():
+                raise click.ClickException(
+                    "An interactive terminal is required for confirmation. Use --yes to apply the previewed changes unattended."
+                )
+            if not click.confirm("Apply these changes?", default=False):
+                click.echo("Migration declined; no files changed.")
+                return
+
+        migration_api.apply(migration)
+        selected = moved_path(migration.config_path, migration.moves)
+        completed = Layout.make(root, selected)
+        click.echo(f"Selected configuration: {selected.relative_to(root)}")
+        click.echo(f"Deployment directory: {completed.site_dir.relative_to(root)}")
+        at_root = Path.cwd().resolve() == root
+        selection = [] if at_root else ["--project-path", str(root)]
+        if selected != root / "docs/great-docs.yml":
+            selection += ["--config", str(selected.relative_to(root) if at_root else selected)]
+        click.echo("Build or preview the migrated documentation:")
+        click.echo("  " + shlex.join(["great-docs", "build", *selection]))
+        click.echo("  " + shlex.join(["great-docs", "preview", *selection]))
+        for item in migration.follow_up:
+            click.echo(item)
+    except (OSError, ValueError) as error:
+        raise click.ClickException(str(error)) from error
+
+
+cli.add_command(migrate_layout)
 
 
 @click.command()

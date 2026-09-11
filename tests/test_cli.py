@@ -22,6 +22,89 @@ from great_docs.cli import (
 )
 
 
+def test_preview_does_not_move_config(tmp_path: Path) -> None:
+    config = tmp_path / "great-docs.yml"
+    config.write_text("display_name: Demo\n")
+    result = CliRunner().invoke(
+        cli,
+        ["migrate-layout", "--project-path", str(tmp_path), "--dry-run"],
+    )
+    assert result.exit_code == 0, result.output
+    assert "docs/great-docs.yml" in result.output
+    assert config.read_text() == "display_name: Demo\n"
+    assert not (tmp_path / "docs").exists()
+
+
+@pytest.mark.parametrize("directory", [".", "docs"])
+@pytest.mark.parametrize("mode", ["single", "versions", "watch", "preview", "preview-build"])
+def test_layout_notice_once_per_build_or_preview_session(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    directory: str,
+    mode: str,
+) -> None:
+    from great_docs import GreatDocs
+
+    source = tmp_path / directory
+    source.mkdir(exist_ok=True)
+    config = "reference: false\nchangelog:\n  enabled: false\nskill:\n  enabled: false\n"
+    if mode == "versions":
+        config += 'versions: ["0.3", "0.2", "0.1"]\n'
+    (source / "great-docs.yml").write_text(config)
+    (source / "index.qmd").write_text("# A small documentation site\n")
+    docs = GreatDocs(str(tmp_path))
+    run = subprocess.run
+    popen = subprocess.Popen
+    rendered: list[Path] = []
+
+    def render(build_dir: Path) -> None:
+        site = build_dir / "_site"
+        site.mkdir(parents=True, exist_ok=True)
+        (site / "index.html").write_text("<html>Documentation</html>")
+        rendered.append(build_dir)
+
+    def run_quarto(
+        command: list[str], *args: object, **kwargs: object
+    ) -> subprocess.CompletedProcess:
+        if command[:2] == ["quarto", "preview"]:
+            for _ in range(3):
+                render(Path.cwd())
+            return subprocess.CompletedProcess(command, 0)
+        return run(command, *args, **kwargs)
+
+    def start_quarto(command: list[str], *args: object, **kwargs: object) -> object:
+        if command[:2] == ["quarto", "render"]:
+            render(Path.cwd())
+            return MagicMock(stdout=iter([]), stderr=iter([]), returncode=0)
+        return popen(command, *args, **kwargs)
+
+    def render_versions(
+        build_dirs: list[Path], **kwargs: object
+    ) -> list[tuple[str, int, str, str, list[dict]]]:
+        for build_dir in build_dirs:
+            render(build_dir)
+        return [(str(build_dir), 0, "", "", []) for build_dir in build_dirs]
+
+    monkeypatch.setattr("great_docs.core._ensure_quarto_installed", lambda: None)
+    monkeypatch.setattr(subprocess, "run", run_quarto)
+    monkeypatch.setattr(subprocess, "Popen", start_quarto)
+    monkeypatch.setattr("great_docs._versioned_build.render_versions_parallel", render_versions)
+    monkeypatch.setattr("http.server.ThreadingHTTPServer", MagicMock())
+    monkeypatch.setattr("threading.Timer", MagicMock())
+    if mode == "preview":
+        docs.layout.site_dir.mkdir(parents=True)
+        (docs.layout.site_dir / "index.html").write_text("<html>Existing site</html>")
+    if mode.startswith("preview"):
+        docs.preview()
+    else:
+        docs.build(watch=mode == "watch", refresh=False)
+    output = capsys.readouterr().out
+    notice = "Keep documentation in docs/ with the new layout.\nRun great-docs migrate-layout --dry-run to preview the migration.\n"
+    assert output.count(notice) == (1 if directory == "." else 0)
+    assert len(rendered) == (3 if mode in {"versions", "watch"} else 0 if mode == "preview" else 1)
+
+
 @pytest.mark.parametrize(
     "command",
     [
