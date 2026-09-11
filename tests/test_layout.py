@@ -96,6 +96,24 @@ def test_create_permits_missing_explicit_config(tmp_path: Path) -> None:
     assert layout.source_dir == config.parent
 
 
+def test_python_initialisation_defaults_to_docs(tmp_path: Path) -> None:
+    from great_docs import GreatDocs
+
+    docs = GreatDocs(str(tmp_path))
+    assert not (tmp_path / "docs").exists()
+    docs.install(force=True)
+    assert (tmp_path / "docs/great-docs.yml").is_file()
+    assert docs.build_dir == tmp_path / "docs/_quarto/default"
+
+
+def test_creation_constructor_does_not_create_directories(tmp_path: Path) -> None:
+    from great_docs import GreatDocs
+
+    docs = GreatDocs(str(tmp_path), config_path=str(tmp_path / "website/settings.yml"), create=True)
+    assert docs.layout.config_path == tmp_path / "website/settings.yml"
+    assert not (tmp_path / "website").exists()
+
+
 def test_create_rejects_existing_non_file_destination(tmp_path: Path) -> None:
     config = tmp_path / "great-docs.yml"
     config.mkdir()

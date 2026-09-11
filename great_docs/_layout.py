@@ -173,6 +173,12 @@ def _select_config(
     """
     if config_path is not None:
         selected = config_path.resolve()
+        if create and not selected.exists():
+            conventional = [package_root / "great-docs.yml", package_root / "docs/great-docs.yml"]
+            if any(path.is_file() and path.resolve() != selected for path in conventional):
+                raise LayoutError(
+                    "A conventional configuration already exists. Select it or migrate the project before creating another configuration."
+                )
         if selected.exists() and not selected.is_file():
             raise LayoutError(f"Configuration path is not a file: {selected}")
         if not create and not selected.is_file():
