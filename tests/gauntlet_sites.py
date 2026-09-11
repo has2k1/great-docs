@@ -358,15 +358,15 @@ def build_site(rendered_dir: Path, name: str) -> Path:
         # stage from the generated documentation project.
         original_dir = Path.cwd()
         try:
-            os.chdir(docs.project_path)
+            os.chdir(docs.build_dir)
             with contextlib.redirect_stdout(io.StringIO()):
-                APIReference(str(docs.project_path / "_quarto.yml")).build()
+                APIReference(str(docs.build_dir / "_quarto.yml")).build()
         finally:
             os.chdir(original_dir)
 
         result = subprocess.run(
             ["quarto", "render"],
-            cwd=docs.project_path,
+            cwd=docs.build_dir,
             env=docs._get_quarto_env(),
             capture_output=True,
             text=True,

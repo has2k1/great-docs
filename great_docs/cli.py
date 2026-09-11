@@ -1757,7 +1757,7 @@ def changelog(project_path: str | None, max_releases: int | None) -> None:
         result = docs._generate_changelog_page()
         if result:
             docs._add_changelog_to_navbar()
-            click.echo(f"✅ Changelog generated: {docs.project_path / result}")
+            click.echo(f"✅ Changelog generated: {docs.build_dir / result}")
         else:
             click.echo("No published releases found on GitHub.")
 
@@ -2285,7 +2285,7 @@ def seo(project_path: str | None, fix: bool, json_output: bool) -> None:
 
     try:
         docs = GreatDocs(project_path=project_path)
-        site_dir = docs.project_path / "_site"
+        site_dir = docs.layout.site_dir
 
         if not site_dir.exists():
             click.echo("Error: Site not built. Run 'great-docs build' first.", err=True)
