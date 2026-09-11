@@ -1,5 +1,6 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from urllib.parse import quote, unquote, urlsplit
 
 import pytest
 from yaml12 import read_yaml, write_yaml
@@ -234,9 +235,111 @@ def test_rebasing_preserves_code_examples(source_project: tuple[Path, Path]) -> 
     root, source = source_project
     (source / "logo.svg").write_text("logo")
     gd = make_docs(root, source)
-    content = '```markdown\n![Logo](logo.svg)\n```\n`![Logo](logo.svg)`\n    <img src="logo.svg">\n'
+    content = '```markdown\n![Logo](logo.svg)\n```\n`![Logo](logo.svg)`\n    <img src="logo.svg">\n<pre>![Logo](logo.svg)</pre>\n'
     assert (
         gd._rebase_source_references(content, source / "index.md", gd.build_dir / "index.qmd")
         == content
     )
     assert not gd.build_dir.exists()
+
+
+@pytest.mark.parametrize(
+    "markup",
+    [
+        '![Plot][plot]\n\n[plot]: assets/plot.svg "A plot"\n',
+        '<img\n  alt="Plot"\n  src="assets/plot.svg">\n',
+        '<div>\n    <img src="assets/plot.svg">\n</div>\n',
+        '```{=html}\n    <img src="assets/plot.svg">\n```\n',
+        '```{html}\n<img src="assets/plot.svg">\n```\n',
+        '<video poster="assets/plot.svg" src="assets/plot.svg"></video>\n',
+        '<img alt=\'src="assets/other.svg"\' src="assets/plot.svg">\n',
+    ],
+)
+def test_static_reference_forms_copy_package_readme_assets(
+    source_project: tuple[Path, Path], markup: str
+) -> None:
+    root, source = source_project
+    (root / "assets").mkdir()
+    (root / "assets/plot.svg").write_text("plot")
+    (root / "assets/other.svg").write_text("other")
+    (root / "README.md").write_text(markup)
+    gd = make_docs(root, source)
+    result = gd._rebase_source_references(markup, root / "README.md", gd.build_dir / "index.qmd")
+    expected_path = "assets/plot.svg" if source == root else "_shared/assets/plot.svg"
+    assert result == markup.replace("assets/plot.svg", expected_path)
+    assert (gd.build_dir / expected_path).read_text() == "plot"
+
+
+@pytest.mark.parametrize(
+    "filename", ["plot chart.svg", "plot#chart.svg", "plot?chart.svg", "plot%chart.svg"]
+)
+def test_asset_references_preserve_url_escaping(
+    source_project: tuple[Path, Path], filename: str
+) -> None:
+    root, source = source_project
+    (source / filename).write_text("plot")
+    gd = make_docs(root, source)
+    reference = quote(filename) + "?raw=1#panel"
+    markup = f"![Plot]({reference})"
+    result = gd._rebase_source_references(markup, source / "README.md", gd.build_dir / "index.qmd")
+    assert result == markup
+    assert (gd.build_dir / filename).is_file()
+
+
+def test_page_references_preserve_url_escaping(source_project: tuple[Path, Path]) -> None:
+    root, source = source_project
+    (source / "user_guide").mkdir()
+    (source / "user_guide/01-start #?.qmd").write_text("# Start")
+    gd = make_docs(root, source)
+    result = gd._rebase_source_references(
+        "[Start](user_guide/01-start%20%23%3F.qmd#intro)",
+        source / "index.md",
+        gd.build_dir / "index.qmd",
+    )
+    assert result == "[Start](user-guide/start%20%23%3F.qmd#intro)"
+
+
+def test_blended_homepage_references_use_final_destination(
+    source_project: tuple[Path, Path],
+) -> None:
+    root, source = source_project
+    (root / "assets").mkdir()
+    (root / "assets/plot.svg").write_text("plot")
+    guide = source / "user_guide"
+    guide.mkdir()
+    prefix = "../" if root == source else "../../"
+    (guide / "01-start.qmd").write_text(
+        f"---\ntitle: Start\n---\n![Plot]({prefix}assets/plot.svg)\n[Next](02-next.qmd)"
+    )
+    (guide / "02-next.qmd").write_text("---\ntitle: Next\n---\n[Start](01-start.qmd#top)")
+    write_yaml(
+        {"module": "sample", "homepage": "user_guide", "hero": False}, source / "great-docs.yml"
+    )
+    gd = make_docs(root, source)
+    gd._prepare_build_directory()
+    info = gd._discover_user_guide()
+    copied = gd._copy_user_guide_to_docs(info)
+    gd._create_blended_index(info, copied)
+    result = (gd.build_dir / "index.qmd").read_text()
+    path = result.split("![Plot](", 1)[1].split(")", 1)[0]
+    assert (gd.build_dir / unquote(urlsplit(path).path)).resolve().is_relative_to(gd.build_dir)
+    assert (gd.build_dir / unquote(urlsplit(path).path)).read_text() == "plot"
+    assert "[Next](user-guide/next.qmd)" in result
+    assert "[Start](../index.qmd#top)" in (gd.build_dir / "user-guide/next.qmd").read_text()
+
+
+def test_custom_html_rebases_local_assets(source_project: tuple[Path, Path]) -> None:
+    root, source = source_project
+    (root / "assets").mkdir()
+    (root / "assets/plot.svg").write_text("plot")
+    (source / "custom").mkdir()
+    prefix = "../" if root == source else "../../"
+    (source / "custom/about.html").write_text(
+        f'---\nlayout: raw\n---\n<div>\n    <img\n      src="{prefix}assets/plot.svg">\n</div>'
+    )
+    gd = make_docs(root, source)
+    gd._prepare_build_directory()
+    gd._process_custom_pages()
+    result = (gd.build_dir / "custom/about.html").read_text()
+    path = result.split('src="', 1)[1].split('"', 1)[0]
+    assert (gd.build_dir / "custom" / unquote(urlsplit(path).path)).read_text() == "plot"
