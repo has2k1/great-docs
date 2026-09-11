@@ -532,8 +532,30 @@ def recovery_instructions(package_root: Path) -> tuple[str, ...]:
     Validate every recorded path before returning instructions. Report current
     bytes against the expected operation results, including an operation whose
     filesystem change preceded its completion record. Preserve changed files
-    and backups for a human to compare and merge.
+    and backups for a human to compare and merge. Limit completed and rolled-back
+    journals to cleanup guidance. Omit reversal commands for operations that
+    were never started or were already undone.
     """
+    windows = sys.platform == "win32"
+
+    def quote(path: Path) -> str:
+        if windows:
+            escaped = str(path)
+            for character in "'\u2018\u2019\u201a\u201b":
+                escaped = escaped.replace(character, character * 2)
+            return "'" + escaped + "'"
+        return shlex.quote(str(path))
+
+    def move_command(source: Path, destination: Path) -> str:
+        before, after = quote(source), quote(destination)
+        if windows:
+            return (
+                f"if ([System.IO.Directory]::Exists({before})) {{ "
+                f"[System.IO.Directory]::Move({before}, {after}) "
+                f"}} else {{ [System.IO.File]::Move({before}, {after}) }}"
+            )
+        return f"mv -n {before} {after}"
+
     root = absolute_path(package_root)
     journal = root / _JOURNAL
     check_symlinks(journal)
@@ -541,24 +563,40 @@ def recovery_instructions(package_root: Path) -> tuple[str, ...]:
         return ()
     if not (journal / "manifest.json").exists():
         return (
-            f"Inspect the incomplete recovery journal at {shlex.quote(str(journal))}; no complete manifest was recorded. Preserve its files before moving it aside.",
+            f"Inspect the incomplete recovery journal at {quote(journal)}; no complete manifest was recorded. Preserve its files before moving it aside.",
         )
     manifest = _load(root, journal)
-
-    def quote(path: Path) -> str:
-        return shlex.quote(str(path))
-
     lines = [
         f"Inspect the {manifest.status} migration journal: {quote(journal / 'manifest.json')}.",
-        "Preserve later user edits before running any recovery commands; compare and merge changed files manually.",
-        "Run the commands below in a POSIX shell.",
+        "Run the commands below in PowerShell."
+        if windows
+        else "Run the commands below in a POSIX shell.",
     ]
+    archive = move_command(
+        journal, journal.with_name("layout-migration-recovered-" + uuid.uuid4().hex)
+    )
+    if manifest.status in {"complete", "rolled_back"}:
+        result = (
+            "Migration completed" if manifest.status == "complete" else "Migration was rolled back"
+        )
+        lines.extend(
+            (
+                f"{result}; only journal cleanup remains. Preserve the current project files.",
+                f"After inspecting the remaining journal files, archive the journal with: {archive}",
+            )
+        )
+        return tuple(lines)
+    lines.append(
+        "Preserve later user edits before running any recovery commands; compare and merge changed files manually."
+    )
     for operation in reversed(manifest.operations):
         path = _target(root, operation.path)
         state = operation.state
         if state in {"intent", "undo_intent"}:
             state += " (no completion record; inspect both locations)"
         lines.append(f"Inspect {operation.kind} {quote(path)}: {state}.")
+        if operation.state in {"planned", "undone"}:
+            continue
         if operation.kind == "move":
             destination = _target(root, operation.destination)
             matches = fingerprint(destination) == operation.after
@@ -566,7 +604,7 @@ def recovery_instructions(package_root: Path) -> tuple[str, ...]:
                 f"Inspect destination {quote(destination)}: {'matches expected result' if matches else 'missing or changed since migration'}."
             )
             lines.append(
-                f"After verifying the original path is absent and preserving any changed files, restore with: mv -n {quote(destination)} {quote(path)}"
+                f"After verifying the original path is absent and preserving any changed files, restore with: {move_command(destination, path)}"
             )
         elif operation.kind == "edit":
             moves = [
@@ -587,11 +625,21 @@ def recovery_instructions(package_root: Path) -> tuple[str, ...]:
             )
             if operation.backup:
                 backup = _target(journal, operation.backup, journal=True)
-                lines.append(
-                    f"Compare the original bytes and mode {stat.S_IMODE(operation.mode):04o}: diff -u {quote(backup)} {quote(current)}"
+                comparison = (
+                    f"Get-FileHash -LiteralPath @({quote(backup)}, {quote(current)}) -Algorithm SHA256"
+                    if windows
+                    else f"diff -u {quote(backup)} {quote(current)}"
+                )
+                restore = (
+                    f"[System.IO.File]::Copy({quote(backup)}, {quote(path)}, $false)"
+                    if windows
+                    else f"cp -p -n {quote(backup)} {quote(path)}"
                 )
                 lines.append(
-                    f"After restoring moved directories and preserving the current file elsewhere, restore the absent original path with: cp -p -n {quote(backup)} {quote(path)}"
+                    f"Compare the original bytes and mode {stat.S_IMODE(operation.mode):04o}: {comparison}"
+                )
+                lines.append(
+                    f"After restoring moved directories and preserving the current file elsewhere, restore the absent original path with: {restore}"
                 )
             else:
                 lines.append(
@@ -602,10 +650,15 @@ def recovery_instructions(package_root: Path) -> tuple[str, ...]:
                     f"Inspect the staged replacement before removing it: {quote(root / operation.stage)}."
                 )
         else:
+            remove_empty = (
+                f"[System.IO.Directory]::Delete({quote(path)}, $false)"
+                if windows
+                else f"rmdir {quote(path)}"
+            )
             lines.append(
-                f"After recovering its contents, remove the empty command-created directory with: rmdir {quote(path)}"
+                f"After recovering its contents, remove the empty command-created directory with: {remove_empty}"
             )
     lines.append(
-        f"After verifying recovery, archive the journal outside its active location with: mv -n {quote(journal)} {quote(journal.with_name('layout-migration-recovered-' + uuid.uuid4().hex))}"
+        f"After verifying recovery, archive the journal outside its active location with: {archive}"
     )
     return tuple(lines)

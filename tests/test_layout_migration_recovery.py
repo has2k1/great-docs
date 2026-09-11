@@ -528,3 +528,124 @@ def test_unrecognised_platform_refuses_migration(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(module, "sys", SimpleNamespace(platform="unsupported"))
     with pytest.raises(MigrationError, match="unavailable"):
         module._rename_function()
+
+
+@pytest.mark.parametrize("status", ["complete", "rolled_back"])
+def test_cleanup_interrupted_after_backup_deletion_never_recommends_rollback(
+    project: Path, monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    module = importlib.import_module("great_docs._layout_migration.apply")
+    journal = project / ".great-docs-cache/layout-migration"
+    unlink = Path.unlink
+    save = module._save
+    before = snapshot(project)
+
+    def interrupt_cleanup(path: Path, missing_ok: bool = False) -> None:
+        unlink(path, missing_ok=missing_ok)
+        if path == journal / "backups/0":
+            raise KeyboardInterrupt
+
+    def fail_after_edit(path: Path, manifest: _Manifest) -> None:
+        if status == "rolled_back" and any(
+            operation.kind == "edit" and operation.state == "done"
+            for operation in manifest.operations
+        ):
+            raise OSError("Request rollback before cleanup interruption")
+        save(path, manifest)
+
+    monkeypatch.setattr(Path, "unlink", interrupt_cleanup)
+    monkeypatch.setattr(module, "_save", fail_after_edit)
+    with pytest.raises(KeyboardInterrupt):
+        api().apply(analyse(Layout.make(project), Path("docs")))
+    data = json.loads((journal / "manifest.json").read_text())
+    assert data["status"] == status
+    assert not (journal / "backups/0").exists()
+    if status == "rolled_back":
+        assert snapshot(project) == before
+    else:
+        assert (project / "docs/great-docs.yml").read_bytes() == (
+            b"module: sample\nbibliography: ../refs.bib\n"
+        )
+        assert (project / "docs/_freeze/page/cache.json").read_bytes() == b"\xff\x00cached"
+    preserved = snapshot(project)
+    instructions = "\n".join(api().recovery_instructions(project))
+    assert "cleanup" in instructions.lower()
+    assert "archive" in instructions.lower()
+    assert "restore with:" not in instructions
+    assert "cp -p" not in instructions
+    assert "rmdir" not in instructions
+    assert "backups/0" not in instructions
+    assert snapshot(project) == preserved
+
+
+@pytest.mark.parametrize("state", ["planned", "undone"])
+@pytest.mark.parametrize("kind", ["mkdir", "edit", "move"])
+def test_active_recovery_omits_reversal_for_inactive_operations(
+    project: Path, monkeypatch: pytest.MonkeyPatch, state: str, kind: str
+) -> None:
+    interrupt_after_freeze(project, monkeypatch)
+    journal = project / ".great-docs-cache/layout-migration"
+    manifest_path = journal / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    operation = next(item for item in manifest["operations"] if item["kind"] == kind)
+    operation["state"] = state
+    manifest["operations"] = [operation]
+    manifest_path.write_text(json.dumps(manifest))
+    preserved = snapshot(project)
+    instructions = "\n".join(api().recovery_instructions(project))
+    assert state in instructions
+    assert "restore with:" not in instructions
+    assert "cp -p" not in instructions
+    assert "rmdir" not in instructions
+    assert "command-created file manually" not in instructions
+    assert snapshot(project) == preserved
+
+
+def test_windows_recovery_uses_literal_quoted_powershell_commands(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = importlib.import_module("great_docs._layout_migration.apply")
+    quoted_root = project.with_name(project.name + " ' [literal] $(touch bad)")
+    project.rename(quoted_root)
+    project = quoted_root
+    interrupt_after_freeze(project, monkeypatch)
+    monkeypatch.setattr(module, "sys", SimpleNamespace(platform="win32"))
+    preserved = snapshot(project)
+    instructions = "\n".join(api().recovery_instructions(project))
+    assert "PowerShell" in instructions
+    assert "POSIX" not in instructions
+    assert "'" + str(project).replace("'", "''") in instructions
+    assert "[System.IO.Directory]::Move(" in instructions
+    assert "[System.IO.File]::Move(" in instructions
+    assert "[System.IO.File]::Copy(" in instructions and ", $false)" in instructions
+    assert "[System.IO.Directory]::Delete(" in instructions
+    assert "Get-FileHash -LiteralPath" in instructions
+    assert "mv -n" not in instructions and "cp -p" not in instructions
+    assert "-Recurse" not in instructions and "-Force" not in instructions
+    assert snapshot(project) == preserved
+
+
+def test_windows_incomplete_journal_path_uses_powershell_quoting(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = importlib.import_module("great_docs._layout_migration.apply")
+    quoted_root = project.with_name(project.name + " ' $(touch bad)")
+    project.rename(quoted_root)
+    journal = quoted_root / ".great-docs-cache/layout-migration"
+    journal.mkdir(parents=True)
+    monkeypatch.setattr(module, "sys", SimpleNamespace(platform="win32"))
+    instructions = "\n".join(api().recovery_instructions(quoted_root))
+    assert "'" + str(journal).replace("'", "''") + "'" in instructions
+
+
+def test_windows_recovery_escapes_smart_single_quotes(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = importlib.import_module("great_docs._layout_migration.apply")
+    quoted_root = project.with_name(project.name + " ‘$(touch bad)’‚‛")
+    project.rename(quoted_root)
+    journal = quoted_root / ".great-docs-cache/layout-migration"
+    journal.mkdir(parents=True)
+    monkeypatch.setattr(module, "sys", SimpleNamespace(platform="win32"))
+    instructions = "\n".join(api().recovery_instructions(quoted_root))
+    assert "‘‘$(touch bad)’’‚‚‛‛" in instructions
