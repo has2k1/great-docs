@@ -332,3 +332,40 @@ def test_recursive_terminal_recordings_have_file_specific_follow_up(project: Pat
     assert any(str(recording) in message for message in result.follow_up)
     assert recording in dict(result.fingerprints)
     assert companion in dict(result.fingerprints)
+
+
+@pytest.mark.parametrize("directory", ["user_guide", "_freeze", "great-docs/_freeze"])
+def test_preview_fingerprint_detects_changed_tree_hierarchy(project: Path, directory: str) -> None:
+    if directory.startswith("great-docs/"):
+        put(project, "great-docs/_quarto.yml", QUARTO_YML_HEADER)
+    tree = project / directory
+    (tree / "a").mkdir(parents=True)
+    sibling = put(tree, "b", b"same bytes")
+    migration = analyse(Layout.make(project), Path("docs"))
+    assert not migration.blockers
+    before = dict(migration.fingerprints)[tree]
+    sibling.rename(tree / "a/b")
+    assert fingerprint(tree) != before
+
+
+def test_intermediate_destination_file_blocks_without_writes(project: Path) -> None:
+    put(project, "great-docs.yml", "sections: [{dir: tutorials/guides}]\n")
+    put(project, "tutorials/guides/start.md", "# Start")
+    obstruction = put(project, "docs/tutorials", "User file")
+    before = snapshot(project)
+    migration = analyse(Layout.make(project), Path("docs"))
+    assert any(str(obstruction) in message for message in migration.blockers)
+    assert snapshot(project) == before
+
+
+@pytest.mark.parametrize("extension", ["html", "qmd"])
+def test_generated_reference_links_do_not_block_analysis(project: Path, extension: str) -> None:
+    reference = f"reference/sample.api.{extension}?view=full#usage"
+    content = f"[API]({reference})\n"
+    put(project, "index.qmd", content)
+    put(project, "user_guide/start.qmd", f"[API](../{reference})\n")
+    before = snapshot(project)
+    migration = analyse(Layout.make(project), Path("docs"))
+    assert not migration.blockers
+    assert not any(edit.path.suffix == ".qmd" for edit in migration.edits)
+    assert snapshot(project) == before

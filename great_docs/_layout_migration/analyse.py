@@ -481,14 +481,6 @@ def analyse(layout: Layout, destination: Path) -> Migration:
         follow_up.append(
             f"Retain generated project {build}; the next build publishes to {destination / '_site'}"
         )
-    for move in moves:
-        try:
-            check_symlinks(move.destination)
-            if move.destination.exists() or move.destination.is_symlink():
-                blockers.append(f"Destination already exists: {move.destination}")
-        except MigrationError as error:
-            blockers.append(str(error))
-
     ignore = root / ".gitignore"
     if retain(ignore):
         try:
@@ -579,4 +571,16 @@ def analyse(layout: Layout, destination: Path) -> Migration:
                 and local_path(value, root) is not None
             ):
                 follow_up.append(f"Review unsupported Quarto path option site.{name}: {value}")
+    targets = [move.destination for move in moves]
+    targets.extend(edit.path for edit in edits if edit.before is None)
+    for target in targets:
+        try:
+            check_symlinks(target)
+            if target.exists() or target.is_symlink():
+                blockers.append(f"Destination already exists: {target}")
+            for parent in target.parents:
+                if parent.exists() and not parent.is_dir():
+                    blockers.append(f"Destination component is not a directory: {parent}")
+        except (OSError, MigrationError) as error:
+            blockers.append(str(error))
     return result()
