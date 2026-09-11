@@ -22,7 +22,9 @@ from great_docs.cli import (
 )
 
 
-@pytest.mark.parametrize("unsafe", ["container", "build", "persistent", "parent", "child", "unowned"])
+@pytest.mark.parametrize(
+    "unsafe", ["container", "build", "persistent", "parent", "child", "unowned"]
+)
 def test_freeze_clean_rejects_unsafe_paths_before_removing_cache(
     tmp_path: Path, unsafe: str
 ) -> None:
@@ -119,8 +121,13 @@ def test_freeze_clean_rejects_parent_traversal_before_normalisation(tmp_path: Pa
         result = CliRunner().invoke(
             cli,
             [
-                "freeze", "docs/page.qmd", "--clean", "--project-path", str(tmp_path),
-                "--freeze-dir", str(override),
+                "freeze",
+                "docs/page.qmd",
+                "--clean",
+                "--project-path",
+                str(tmp_path),
+                "--freeze-dir",
+                str(override),
             ],
         )
 
@@ -137,9 +144,7 @@ def test_freeze_clean_accepts_ordinary_relative_cache(
     cache.mkdir()
     (cache / "result.json").write_bytes(b"cache\x00")
     with patch("great_docs.cli.GreatDocs._prepare_for_freeze") as prepare:
-        CliRunner().invoke(
-            cli, ["freeze", "page.qmd", "--clean", "--freeze-dir", "cached-results"]
-        )
+        CliRunner().invoke(cli, ["freeze", "page.qmd", "--clean", "--freeze-dir", "cached-results"])
     prepare.assert_called_once()
     assert not cache.exists()
 
