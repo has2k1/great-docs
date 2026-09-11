@@ -424,14 +424,17 @@ def rewrite_document(
         moved = moved_path(input_target, moves)
         if input_target != target:
             moved = moved.with_suffix(target.suffix)
-        if any(
-            input_target.is_relative_to(directory.source) and directory.strip_prefix
-            for directory in content_directories
-        ):
-            # The build strips numeric prefixes from every filename in this
-            # directory, so the published (and hence correct) reference never
-            # carries one, however the retained source file happens to be named.
-            moved = moved.with_name(strip_numeric_prefix(moved.name))
+        for directory in content_directories:
+            if input_target.is_relative_to(directory.source) and directory.strip_prefix:
+                # The build strips numeric prefixes from every path component in
+                # this directory (core.py's `_source_page_destination`), so the
+                # published (and hence correct) reference never carries one,
+                # however the retained source file happens to be named.
+                destination_root = moved_path(directory.source, moves)
+                relative = moved.relative_to(destination_root)
+                stripped = Path(*(strip_numeric_prefix(part) for part in relative.parts))
+                moved = destination_root / stripped
+                break
         candidate = absolute_path(relocated.parent / unquote(url.path))
         if candidate == moved:
             continue

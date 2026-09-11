@@ -318,3 +318,21 @@ def test_renamed_directory_html_reference_resolves(tmp_path: Path) -> None:
     assert not blockers
     assert guide / "11-theming.qmd" in inputs
     assert result == "[Theming](../user_guide/theming.html)"
+
+
+def test_numeric_prefix_reference_resolves_across_nested_directories(tmp_path: Path) -> None:
+    guide = tmp_path / "user_guide"
+    (guide / "02-advanced").mkdir(parents=True)
+    (guide / "02-advanced/03-tips.qmd").write_text("# Tips")
+    page = guide / "00-intro.qmd"
+    page.write_text("[Tips](advanced/tips.qmd)")
+    content_directories = (ContentDirectory(guide, "user-guide", True),)
+    result, inputs, _, blockers = rewrite_document(
+        page.read_text(),
+        page,
+        (Move(guide, tmp_path / "docs/user_guide"),),
+        content_directories=content_directories,
+    )
+    assert not blockers
+    assert guide / "02-advanced/03-tips.qmd" in inputs
+    assert result == "[Tips](advanced/tips.qmd)"
