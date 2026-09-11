@@ -422,11 +422,19 @@ def analyse(layout: Layout, destination: Path) -> Migration:
                 follow_up.append(
                     f"Review reStructuredText references to moved documentation in {path}"
                 )
+    generated_homepage = None
+    if not any((root / name).exists() for name in ("index.qmd", "index.md")) and any(
+        (root / name).is_file() for name in ("README.md", "README.rst")
+    ):
+        generated_homepage = root / "index.qmd"
     for path in sorted(documents):
         try:
             content = path.read_bytes()
             rewritten_text, inputs, notes, conflicts = rewrite_document(
-                content.decode("utf-8"), path, tuple(moves)
+                content.decode("utf-8"),
+                path,
+                tuple(moves),
+                generated_homepage=generated_homepage,
             )
             follow_up.extend(notes)
             blockers.extend(conflicts)
