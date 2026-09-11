@@ -289,7 +289,7 @@ def test_L2_init_creates_config(pkg_name: str, tmp_path: Path):
     docs = GreatDocs(project_path=str(pkg_dir))
     docs.install(force=True)
 
-    config_path = pkg_dir / "great-docs.yml"
+    config_path = docs.layout.config_path
     assert config_path.exists(), "great-docs.yml was not created"
 
     # Config should be parseable YAML
@@ -316,7 +316,7 @@ def test_L2_init_detects_correct_exports(pkg_name: str, tmp_path: Path):
     # Read the generated config and check reference sections
     from yaml12 import format_yaml, parse_yaml, read_yaml
 
-    config_path = pkg_dir / "great-docs.yml"
+    config_path = docs.layout.config_path
     with open(config_path, encoding="utf-8") as f:
         config_data = read_yaml(f)
 
