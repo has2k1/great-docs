@@ -10,8 +10,10 @@ Usage:
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -31,7 +33,7 @@ from mcp.types import (
 )
 from pydantic import AnyUrl
 
-from ._layout import Layout
+from ._layout import Layout, LayoutError
 from ._utils import is_in_great_docs_build_dir, recognised_build_dirs
 
 server = Server("great-docs")
@@ -473,12 +475,24 @@ async def _handle_preview(arguments: dict) -> list[TextContent]:
             )
         ]
 
+    command = shlex.join(
+        [
+            "great-docs",
+            "preview",
+            "--project-path",
+            str(layout.package_root),
+            "--config",
+            str(layout.config_path),
+            "--port",
+            str(port),
+        ]
+    )
     return [
         TextContent(
             type="text",
             text=(
                 f"Preview server can be started with:\n"
-                f"  great-docs preview --project-path {layout.package_root} --config {layout.config_path} --port {port}\n\n"
+                f"  {command}\n\n"
                 f"Build directory: {build_dir}\n"
                 f"The site will be available at http://localhost:{port}/"
             ),
@@ -1043,8 +1057,11 @@ async def list_resources() -> list[Resource]:
     root = Path.cwd()
 
     # Configuration file
-    config_path = Layout.make(root).config_path
-    if config_path.exists():
+    try:
+        config_path = Layout.make(root).config_path
+    except LayoutError:
+        config_path = None
+    if config_path is not None and config_path.exists():
         resources.append(
             Resource(
                 name="configuration",
@@ -1110,18 +1127,26 @@ async def list_resources() -> list[Resource]:
 
 @_handler("read_resource")
 async def read_resource(uri: AnyUrl) -> str:
-    """Read the contents of a documentation resource."""
-    uri_str = str(uri)
-    root = Path.cwd()
+    """
+    Read a resource with optional project and configuration selection
+
+    The `project_path` and `config_path` query parameters follow tool argument
+    semantics. Bare URIs use automatic project configuration discovery.
+    """
+    parts = urlsplit(str(uri))
+    uri_str = parts._replace(query="").geturl()
+    query = parse_qs(parts.query)
+    arguments = {name: query[name][0] for name in ("project_path", "config_path") if name in query}
+    root = _get_project_root(arguments.get("project_path"))
 
     if uri_str == "gd://config":
-        config_path = Layout.make(root).config_path
+        config_path = _get_layout(arguments).config_path
         if not config_path.exists():
             return "# No great-docs.yml found.\n# Run `gd_config` with generate=true to create one."
         return config_path.read_text(encoding="utf-8")
 
     elif uri_str == "gd://build-log":
-        build_dirs = _build_output_dirs(root)
+        build_dirs = _build_output_dirs(root, _get_layout(arguments))
         if build_dirs:
             names = ", ".join(d.name for d in build_dirs)
             return (
@@ -1132,7 +1157,7 @@ async def read_resource(uri: AnyUrl) -> str:
 
     elif uri_str == "gd://api-surface":
         try:
-            docs = _get_great_docs()
+            docs = _get_great_docs(arguments.get("project_path"), arguments.get("config_path"))
             package_name = docs._detect_package_name()
             if not package_name:
                 return "Error: Could not detect package name."
@@ -1165,7 +1190,7 @@ async def read_resource(uri: AnyUrl) -> str:
             return f"Error discovering API surface: {e}"
 
     elif uri_str == "gd://status":
-        result = await _handle_status({})
+        result = await _handle_status(arguments)
         return result[0].text
 
     elif uri_str == "gd://pyproject":
@@ -1178,7 +1203,7 @@ async def read_resource(uri: AnyUrl) -> str:
         # Dynamic reference page resource (from template)
         symbol = uri_str.removeprefix("gd://reference/")
         try:
-            docs = _get_great_docs()
+            docs = _get_great_docs(arguments.get("project_path"), arguments.get("config_path"))
             package_name = docs._detect_package_name()
             module_name = docs._detect_module_name()
             importable_name = module_name or docs._normalize_package_name(package_name)
@@ -1216,9 +1241,23 @@ async def read_resource(uri: AnyUrl) -> str:
 async def list_resource_templates() -> list[ResourceTemplate]:
     """List dynamic resource templates."""
     return [
+        *[
+            ResourceTemplate(
+                name=f"selected-{resource}",
+                uriTemplate=f"gd://{resource}{{?project_path,config_path}}",
+                description=f"Read {description}. Select a configuration with config_path when automatic discovery is ambiguous or a custom path is used.",
+                mimeType="text/yaml" if resource == "config" else "text/plain",
+            )
+            for resource, description in (
+                ("config", "the project configuration"),
+                ("api-surface", "the selected package's public API"),
+                ("status", "the selected documentation project's status"),
+                ("build-log", "the selected documentation project's build output locations"),
+            )
+        ],
         ResourceTemplate(
             name="reference-symbol",
-            uriTemplate="gd://reference/{symbol}",
+            uriTemplate="gd://reference/{symbol}{?project_path,config_path}",
             description=(
                 "Read documentation for a specific API symbol. "
                 "Returns the symbol's kind, module path, and docstring."
@@ -1227,7 +1266,7 @@ async def list_resource_templates() -> list[ResourceTemplate]:
         ),
         ResourceTemplate(
             name="doc-page",
-            uriTemplate="gd://page/{path}",
+            uriTemplate="gd://page/{path}{?project_path,config_path}",
             description=(
                 "Read the source content of any documentation page (.qmd file). "
                 "Path is relative to the project root (e.g., 'user_guide/getting-started.qmd')."
