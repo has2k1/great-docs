@@ -111,10 +111,18 @@ def _check_freeze_ignore_policy(
     for path in (root, *root.parents):
         if path.is_relative_to(repository):
             retain_policy(path / ".gitignore")
-    for name in ("info/exclude", "config", "config.worktree", "HEAD"):
+    for name in ("info/exclude", "config", "config.worktree", "HEAD", "index"):
         retain_policy(
             absolute_path(root / os.fsdecode(git("rev-parse", "--git-path", name)).strip())
         )
+    shared_index = os.fsdecode(git("rev-parse", "--shared-index-path")).strip()
+    if shared_index:
+        retain_policy(absolute_path(root / shared_index))
+    tracked = {
+        root / os.fsdecode(path)
+        for path in git("ls-files", "--cached", "-z", "--", "_freeze").split(b"\0")
+        if path
+    }
     config = git("config", "--show-origin", "--list").decode("utf-8")
     for line in config.splitlines():
         origin, separator, entry = line.partition("\t")
@@ -160,6 +168,16 @@ def _check_freeze_ignore_policy(
     )
     for index in range(0, len(queries), 2):
         before, after = queries[index : index + 2]
+        original = root / before
+        if original in tracked and os.fsencode(after) in ignored:
+            raise MigrationError(
+                f"Migration would lose tracked cache status: {before} -> {after}. "
+                "Make the destination cache file addable in .gitignore and preview again"
+            )
+        if original.is_dir() and any(path.is_relative_to(original) for path in tracked):
+            continue
+        if original in tracked:
+            continue
         if (os.fsencode(before) in ignored) != (os.fsencode(after) in ignored):
             raise MigrationError(
                 f"Migration would change freeze ignore policy: {before} -> {after}. "

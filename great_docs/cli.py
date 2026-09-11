@@ -1223,11 +1223,13 @@ def freeze(
 
         try:
             validate_layout_outputs(layout)
+            if ".." in persist_dir.parts:
+                raise ValueError(f"Freeze cache path contains parent traversal: {persist_dir}")
+            persist_dir = Path(os.path.abspath(persist_dir))
             for cache in (persist_dir, build_dir / "_freeze"):
-                absolute = Path(os.path.abspath(cache))
-                if any(parent.is_symlink() for parent in absolute.parents):
+                if any(parent.is_symlink() for parent in cache.parents):
                     raise ValueError(f"Freeze cache has a symlink parent: {cache}")
-                validate_tree_symlinks(absolute)
+                validate_tree_symlinks(cache)
         except ValueError as error:
             raise click.ClickException(str(error)) from error
         if persist_dir.exists():
