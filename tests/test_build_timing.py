@@ -7,7 +7,6 @@ from unittest.mock import patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Regex: matches Quarto progress lines and captures page path
 # ---------------------------------------------------------------------------
@@ -70,7 +69,7 @@ class TestWriteBuildTiming:
         # Create a minimal great-docs.yml so Config doesn't fail
         (tmp_path / "great-docs.yml").write_text("name: test-pkg\n")
         gd = GreatDocs.__new__(GreatDocs)
-        gd.project_path = tmp_path
+        gd.build_dir = tmp_path
         gd.project_root = tmp_path
         return gd
 
