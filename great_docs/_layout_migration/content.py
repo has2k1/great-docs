@@ -8,6 +8,7 @@ import json
 import os
 import re
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
@@ -17,11 +18,79 @@ from yaml.events import AliasEvent
 from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from yaml12 import read_yaml
 
+from great_docs._content_naming import strip_numeric_prefix
 from great_docs._source_refs import fenced_code_spans, source_reference_spans
 
 from .model import MigrationError, Move, absolute_path, check_symlinks, moved_path
 
 ConfigPath = tuple[str | int, ...]
+
+
+@dataclass(frozen=True)
+class ContentDirectory:
+    """A recognised content root and how the build renames it for publishing"""
+
+    source: Path
+    output_name: str
+    strip_prefix: bool
+
+
+def _denormalize(target: Path, content_directories: tuple[ContentDirectory, ...]) -> Path | None:
+    """
+    Resolve a target through the build's own directory rename and prefix rule
+
+    Parameters
+    ----------
+    target
+        A path that does not exist literally on disk.
+    content_directories
+        Recognised content roots, in the shape `analyse()` builds them.
+
+    Returns
+    -------
+    Path | None
+        The real source file the target corresponds to, or `None` if it
+        doesn't match any recognised content directory.
+    """
+    for directory in content_directories:
+        root = directory.source.parent
+        renamed = root / directory.output_name
+        if target.is_relative_to(renamed):
+            relative = target.relative_to(renamed)
+        elif target.is_relative_to(directory.source):
+            relative = target.relative_to(directory.source)
+        else:
+            continue
+        if not relative.parts:
+            return None
+        if not directory.strip_prefix:
+            candidate = directory.source / relative
+            return candidate if candidate.is_file() else None
+        current = directory.source
+        for part in relative.parts[:-1]:
+            if not current.is_dir():
+                return None
+            matches = [
+                child
+                for child in current.iterdir()
+                if child.is_dir() and strip_numeric_prefix(child.name) == part
+            ]
+            if len(matches) != 1:
+                return None
+            current = matches[0]
+        if not current.is_dir():
+            return None
+        last = relative.parts[-1]
+        stems = {last, Path(last).with_suffix(".qmd").name, Path(last).with_suffix(".md").name}
+        matches = [
+            child
+            for child in current.iterdir()
+            if child.is_file() and strip_numeric_prefix(child.name) in stems
+        ]
+        return matches[0] if len(matches) == 1 else None
+    return None
+
+
 _GENERATED_REFERENCE = re.compile(
     r"(?:\.\.?/)*reference/[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\.(?:html|qmd)\Z"
 )
@@ -281,6 +350,7 @@ def rewrite_document(
     moves: tuple[Move, ...],
     *,
     generated_homepage: Path | None = None,
+    content_directories: tuple[ContentDirectory, ...] = (),
 ) -> tuple[str, tuple[Path, ...], tuple[str, ...], tuple[str, ...]]:
     """
     Rebase static document destinations against their original source targets
@@ -317,6 +387,17 @@ def rewrite_document(
             if not target.exists() and target.suffix.lower() == ".html":
                 candidates = [target.with_suffix(suffix) for suffix in (".qmd", ".md")]
                 matches = [candidate for candidate in candidates if candidate.is_file()]
+                if not matches:
+                    matches = list(
+                        dict.fromkeys(
+                            resolved
+                            for resolved in (
+                                _denormalize(candidate, content_directories)
+                                for candidate in candidates
+                            )
+                            if resolved is not None
+                        )
+                    )
                 if len(matches) == 1:
                     input_target = matches[0]
                     check_symlinks(input_target)
@@ -327,10 +408,15 @@ def rewrite_document(
                         f"Cannot resolve rendered page reference in {source}: {value}"
                     )
             if not input_target.exists():
-                # Generated API pages have published identities but no repository source.
-                if _GENERATED_REFERENCE.fullmatch(unquote(url.path)):
+                denormalized = _denormalize(input_target, content_directories)
+                if denormalized is not None:
+                    input_target = denormalized
+                    check_symlinks(input_target)
+                elif _GENERATED_REFERENCE.fullmatch(unquote(url.path)):
+                    # Generated API pages have published identities but no repository source.
                     continue
-                raise MigrationError(f"Broken reference in {source}: {value}")
+                else:
+                    raise MigrationError(f"Broken reference in {source}: {value}")
         except (OSError, MigrationError) as error:
             blockers.append(str(error))
             continue
@@ -338,6 +424,14 @@ def rewrite_document(
         moved = moved_path(input_target, moves)
         if input_target != target:
             moved = moved.with_suffix(target.suffix)
+        if any(
+            input_target.is_relative_to(directory.source) and directory.strip_prefix
+            for directory in content_directories
+        ):
+            # The build strips numeric prefixes from every filename in this
+            # directory, so the published (and hence correct) reference never
+            # carries one, however the retained source file happens to be named.
+            moved = moved.with_name(strip_numeric_prefix(moved.name))
         candidate = absolute_path(relocated.parent / unquote(url.path))
         if candidate == moved:
             continue

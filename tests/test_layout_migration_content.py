@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from yaml12 import read_yaml
 
-from great_docs._layout_migration.content import rewrite_config, rewrite_document
+from great_docs._layout_migration.content import ContentDirectory, rewrite_config, rewrite_document
 from great_docs._layout_migration.model import MigrationError, Move
 
 
@@ -264,3 +264,57 @@ def test_generated_page_recognition_keeps_missing_input_checks(
         f"[Missing]({reference})", page, (Move(page, tmp_path / "docs/index.qmd"),)
     )
     assert any(reference in message for message in blockers)
+
+
+def test_numeric_prefix_reference_resolves_across_the_move(tmp_path: Path) -> None:
+    guide = tmp_path / "user_guide"
+    guide.mkdir()
+    (guide / "00-introduction.qmd").write_text("[Install](installation.qmd)")
+    (guide / "01-installation.qmd").write_text("# Installation")
+    content_directories = (ContentDirectory(guide, "user-guide", True),)
+    result, inputs, _, blockers = rewrite_document(
+        (guide / "00-introduction.qmd").read_text(),
+        guide / "00-introduction.qmd",
+        (Move(guide, tmp_path / "docs/user_guide"),),
+        content_directories=content_directories,
+    )
+    assert not blockers
+    assert guide / "01-installation.qmd" in inputs
+    assert result == "[Install](installation.qmd)"
+
+
+def test_explicit_user_guide_ordering_does_not_strip_prefixes(tmp_path: Path) -> None:
+    guide = tmp_path / "user_guide"
+    guide.mkdir()
+    (guide / "00-introduction.qmd").write_text("[Install](installation.qmd)")
+    (guide / "01-installation.qmd").write_text("# Installation")
+    content_directories = (ContentDirectory(guide, "user-guide", False),)
+    _, _, _, blockers = rewrite_document(
+        (guide / "00-introduction.qmd").read_text(),
+        guide / "00-introduction.qmd",
+        (Move(guide, tmp_path / "docs/user_guide"),),
+        content_directories=content_directories,
+    )
+    assert any("installation.qmd" in message for message in blockers)
+
+
+def test_renamed_directory_html_reference_resolves(tmp_path: Path) -> None:
+    guide = tmp_path / "user_guide"
+    guide.mkdir()
+    (guide / "11-theming.qmd").write_text("# Theming")
+    recipes = tmp_path / "recipes"
+    recipes.mkdir()
+    (recipes / "06-choose-gradient-theme.qmd").write_text("[Theming](../user-guide/theming.html)")
+    content_directories = (ContentDirectory(guide, "user-guide", True),)
+    result, inputs, _, blockers = rewrite_document(
+        (recipes / "06-choose-gradient-theme.qmd").read_text(),
+        recipes / "06-choose-gradient-theme.qmd",
+        (
+            Move(guide, tmp_path / "docs/user_guide"),
+            Move(recipes, tmp_path / "docs/recipes"),
+        ),
+        content_directories=content_directories,
+    )
+    assert not blockers
+    assert guide / "11-theming.qmd" in inputs
+    assert result == "[Theming](../user_guide/theming.html)"
