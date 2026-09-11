@@ -15957,6 +15957,14 @@ anchor-sections: true
             os.chdir(original_dir)
             devnull.close()
 
+    def _print_layout_notice(self) -> None:
+        """Recommend migration at the start of a root-layout build or preview"""
+        if self.layout.source_dir == self.layout.package_root:
+            print(
+                "Keep documentation in docs/ with the new layout.\n"
+                "Run great-docs migrate-layout --dry-run to preview the migration."
+            )
+
     def build(  # pragma: no cover
         self,
         watch: bool = False,
@@ -16022,6 +16030,7 @@ anchor-sections: true
                 "generate a configuration file."
             )
 
+        self._print_layout_notice()
         _ensure_quarto_installed()
 
         import re as _re_build
@@ -17496,6 +17505,8 @@ anchor-sections: true
         if not index_html.exists():
             print("Site not found, building first...")
             self.build()
+        else:
+            self._print_layout_notice()
 
         if not index_html.exists():
             print("❌ Could not find built site")

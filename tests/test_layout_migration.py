@@ -3,12 +3,301 @@ import os
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 from yaml12 import read_yaml
 
 from great_docs._layout import Layout
 from great_docs._layout_migration import analyse
 from great_docs._layout_migration.model import Move, fingerprint
 from great_docs._utils import QUARTO_YML_HEADER
+from great_docs.cli import cli
+
+
+class TerminalInput(io.BytesIO):
+    """Confirmation input from an interactive terminal"""
+
+    def isatty(self) -> bool:
+        return True
+
+
+@pytest.mark.parametrize(
+    "flags, reply, applied",
+    [
+        ([], b"y\n", True),
+        ([], b"n\n", False),
+        (["--yes"], None, True),
+        (["--dry-run", "--yes"], None, False),
+    ],
+)
+def test_migration_command_confirmation(
+    project: Path, flags: list[str], reply: bytes | None, applied: bool
+) -> None:
+    before = snapshot(project)
+    result = CliRunner().invoke(
+        cli,
+        ["migrate-layout", "--project-path", str(project), *flags],
+        input=TerminalInput(reply) if reply else None,
+    )
+    assert result.exit_code == 0, result.output
+    assert (project / "docs/great-docs.yml").is_file() == applied
+    if not applied:
+        assert snapshot(project) == before
+
+
+def test_migration_command_requires_interactive_confirmation(project: Path) -> None:
+    before = snapshot(project)
+    result = CliRunner().invoke(
+        cli, ["migrate-layout", "--project-path", str(project)], input="y\n"
+    )
+    assert result.exit_code != 0
+    assert "--yes" in result.output
+    assert snapshot(project) == before
+
+
+@pytest.mark.parametrize("destination", ["docs", "website", "website pages"])
+def test_migration_command_repeat_is_read_only(
+    project: Path, destination: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(project)
+    args = ["migrate-layout", "--project-path", str(project), "--to", destination]
+    result = CliRunner().invoke(cli, [*args, "--yes"])
+    assert result.exit_code == 0, result.output
+    assert (project / destination / "great-docs.yml").is_file()
+    assert str(Path(destination) / "_site") in result.output
+    if destination != "docs":
+        import shlex
+
+        commands = [
+            line.strip()
+            for line in result.output.splitlines()
+            if line.strip().startswith("great-docs build")
+        ]
+        assert ["great-docs", "build", "--config", str(Path(destination) / "great-docs.yml")] in [
+            shlex.split(command) for command in commands
+        ]
+    before = snapshot(project)
+    result = CliRunner().invoke(cli, args)
+    assert result.exit_code == 0, result.output
+    assert "no migration is needed" in result.output.lower()
+    assert snapshot(project) == before
+
+
+def test_migration_command_reports_conflicts_even_with_yes(project: Path) -> None:
+    put(project, "docs/great-docs.yml", "display_name: Occupied\n")
+    before = snapshot(project)
+    result = CliRunner().invoke(
+        cli,
+        [
+            "migrate-layout",
+            "--project-path",
+            str(project),
+            "--config",
+            str(project / "great-docs.yml"),
+            "--yes",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "already exists" in result.output.lower()
+    assert snapshot(project) == before
+
+
+@pytest.mark.parametrize("failure", ["absent", "unreadable", "symlink", "escape"])
+def test_migration_custom_fallback_is_validated(
+    project: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    (project / "great-docs.yml").unlink()
+    destination = "website"
+    if failure == "unreadable":
+        selected = put(project, "website/great-docs.yml", "module: sample\n")
+        read_bytes = Path.read_bytes
+
+        def unreadable(path: Path) -> bytes:
+            if path == selected:
+                raise PermissionError("Configuration is unreadable")
+            return read_bytes(path)
+
+        monkeypatch.setattr(Path, "read_bytes", unreadable)
+    elif failure == "symlink":
+        put(project, "actual/great-docs.yml", "module: sample\n")
+        (project / "website").symlink_to(project / "actual", target_is_directory=True)
+    elif failure == "escape":
+        destination = "../outside"
+    before = {str(path.relative_to(project)) for path in project.rglob("*")}
+    result = CliRunner().invoke(
+        cli, ["migrate-layout", "--project-path", str(project), "--to", destination, "--yes"]
+    )
+    assert result.exit_code != 0, result.output
+    assert {str(path.relative_to(project)) for path in project.rglob("*")} == before
+
+
+def test_explicit_migrated_config_is_noop_unless_relocation_requested(project: Path) -> None:
+    (project / "great-docs.yml").unlink()
+    selected = put(project, "website/settings.yml", "module: sample\n")
+    args = ["migrate-layout", "--project-path", str(project), "--config", str(selected)]
+    before = snapshot(project)
+    result = CliRunner().invoke(cli, args)
+    assert result.exit_code == 0, result.output
+    assert "no migration is needed" in result.output.lower()
+    result = CliRunner().invoke(cli, [*args, "--to", "docs", "--yes"])
+    assert result.exit_code != 0
+    assert "unsupported" in result.output.lower()
+    assert snapshot(project) == before
+
+
+def test_migration_uses_one_proposal_for_preview_and_application(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from great_docs import _layout_migration as migration_api
+    from great_docs._layout_migration import Migration
+
+    analysed: list[Migration] = []
+    analyse_original, apply_original = migration_api.analyse, migration_api.apply
+
+    def analyse_once(layout: Layout, target: Path) -> Migration:
+        proposal = analyse_original(layout, target)
+        analysed.append(proposal)
+        return proposal
+
+    def apply_reviewed(proposal: Migration) -> None:
+        assert len(analysed) == 1
+        assert proposal is analysed[0]
+        apply_original(proposal)
+
+    monkeypatch.setattr(migration_api, "analyse", analyse_once)
+    monkeypatch.setattr(migration_api, "apply", apply_reviewed)
+    result = CliRunner().invoke(cli, ["migrate-layout", "--project-path", str(project), "--yes"])
+    assert result.exit_code == 0, result.output
+    assert len(analysed) == 1
+    assert (project / "docs/great-docs.yml").is_file()
+
+
+def test_migration_rejects_changes_made_during_confirmation(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def confirm(*args: object, **kwargs: object) -> bool:
+        (project / "great-docs.yml").write_text("display_name: Later user edit\n")
+        return True
+
+    monkeypatch.setattr("click.confirm", confirm)
+    result = CliRunner().invoke(
+        cli, ["migrate-layout", "--project-path", str(project)], input=TerminalInput(b"y\n")
+    )
+    assert result.exit_code != 0
+    assert "fresh preview" in result.output
+    assert (project / "great-docs.yml").read_text() == "display_name: Later user edit\n"
+    assert not (project / "docs").exists()
+
+
+def test_migration_command_preserves_noncanonical_filename_selection(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import shlex
+
+    monkeypatch.chdir(project)
+    selected = project / "settings file.yml"
+    (project / "great-docs.yml").rename(selected)
+    result = CliRunner().invoke(
+        cli, ["migrate-layout", "--project-path", str(project), "--config", str(selected), "--yes"]
+    )
+    assert result.exit_code == 0, result.output
+    command = next(
+        line.strip()
+        for line in result.output.splitlines()
+        if line.strip().startswith("great-docs build")
+    )
+    assert shlex.split(command) == ["great-docs", "build", "--config", "docs/settings file.yml"]
+    before = snapshot(project)
+    result = CliRunner().invoke(
+        cli,
+        [
+            "migrate-layout",
+            "--project-path",
+            str(project),
+            "--config",
+            str(project / "docs/settings file.yml"),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "no migration is needed" in result.output.lower()
+    assert snapshot(project) == before
+
+
+@pytest.mark.parametrize("working_directory", ["root", "nested", "outside"])
+@pytest.mark.parametrize("destination", ["docs", "website pages"])
+def test_migration_suggested_commands_select_project_from_invocation_directory(
+    project: Path, monkeypatch: pytest.MonkeyPatch, working_directory: str, destination: str
+) -> None:
+    import shlex
+
+    cwd = {"root": project, "nested": project / "sample", "outside": project.parent}[
+        working_directory
+    ]
+    monkeypatch.chdir(cwd)
+    result = CliRunner().invoke(
+        cli, ["migrate-layout", "--project-path", str(project), "--to", destination, "--yes"]
+    )
+    assert result.exit_code == 0, result.output
+    selection = [] if working_directory == "root" else ["--project-path", str(project)]
+    if destination != "docs":
+        selected = project / destination / "great-docs.yml"
+        selection += [
+            "--config",
+            str(selected.relative_to(project) if working_directory == "root" else selected),
+        ]
+    commands = [
+        shlex.split(line.strip())
+        for line in result.output.splitlines()
+        if line.strip().startswith("great-docs ")
+    ]
+    assert ["great-docs", "build", *selection] in commands
+    assert ["great-docs", "preview", *selection] in commands
+
+
+def test_migration_help_is_directly_available_but_hidden_from_public_reference(
+    project: Path,
+) -> None:
+    from great_docs import GreatDocs
+
+    result = CliRunner().invoke(cli, ["migrate-layout", "--help"])
+    assert result.exit_code == 0, result.output
+    assert "--config" in result.output and "--dry-run" in result.output
+    result = CliRunner().invoke(cli, ["--help"])
+    assert "migrate-layout" not in result.output
+    info = GreatDocs(str(project))._extract_click_command(cli, "great-docs")
+    assert all(command["name"] != "migrate-layout" for command in info["commands"])
+
+
+@pytest.mark.parametrize("selected", ["missing", "ambiguous", "migrated"])
+def test_pending_recovery_precedes_config_selection(
+    project: Path, monkeypatch: pytest.MonkeyPatch, selected: str
+) -> None:
+    import importlib
+
+    from great_docs._layout_migration import apply
+
+    application = importlib.import_module("great_docs._layout_migration.apply")
+    move = application._move
+
+    def interrupt(source: Path, destination: Path) -> None:
+        move(source, destination)
+        if source == project / "great-docs.yml":
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(application, "_move", interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        apply(analyse(Layout.make(project), Path("docs")))
+    args = ["migrate-layout", "--project-path", str(project), "--yes"]
+    if selected == "missing":
+        args += ["--config", str(project / "great-docs.yml")]
+    elif selected == "ambiguous":
+        put(project, "great-docs.yml", "module: sample\n")
+    before = snapshot(project)
+    result = CliRunner().invoke(cli, args)
+    assert result.exit_code != 0
+    assert "recovery" in result.output.lower()
+    assert "manifest.json" in result.output
+    assert "no completion record" in result.output
+    assert snapshot(project) == before
 
 
 def put(root: Path, relative: str, content: str | bytes = "") -> Path:
