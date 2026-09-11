@@ -445,6 +445,7 @@ async def _handle_build(arguments: dict) -> list[TextContent]:
     if clean:
         import shutil
 
+        docs._validate_build_outputs()
         for ver_dir in _sibling_build_dirs(_get_project_root(project_path), _get_layout(arguments)):
             shutil.rmtree(ver_dir)
 

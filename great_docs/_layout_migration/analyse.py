@@ -5,7 +5,9 @@ from __future__ import annotations
 import configparser
 import os
 import re
+import subprocess
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +47,125 @@ _RESERVED = {
     "_freeze",
     "assets",
 }
+
+
+def _check_freeze_ignore_policy(
+    root: Path,
+    destination: Path,
+    paths: set[Path],
+    retain: Callable[[Path], bool],
+    retain_policy: Callable[[Path], bool],
+) -> None:
+    """
+    Refuse cache relocation when effective ignore rules would change
+
+    Compare rules independently of the index so tracked cache files and
+    untracked exceptions keep their existing policy. Retain the local and
+    external rule inputs for application-time revalidation.
+    """
+    source = root / "_freeze"
+    if any(path.name == ".gitignore" for path in paths):
+        raise MigrationError(
+            "Cannot preserve freeze ignore policy with nested cache .gitignore files; "
+            "move those rules to the package .gitignore and preview again"
+        )
+    pairs = [(source / path, destination / "_freeze" / path) for path in paths | {Path(".")}]
+    rules = {
+        parent / ".gitignore"
+        for pair in pairs
+        for path in pair
+        for parent in path.parents
+        if parent.is_relative_to(root)
+    }
+    for path in sorted(rules):
+        retain(path)
+    if not any((parent / ".git").exists() for parent in (root, *root.parents)):
+        harmless = {"great-docs/", "/great-docs/"}
+        if any(
+            line.strip() and not line.lstrip().startswith("#") and line.strip() not in harmless
+            for path in rules
+            if path.is_file()
+            for line in path.read_text(encoding="utf-8").splitlines()
+        ):
+            raise MigrationError(
+                "Cannot verify freeze ignore policy outside a Git worktree; "
+                "initialise Git, check destination cache rules, and preview again"
+            )
+        return
+
+    def git(*args: str, input_bytes: bytes | None = None) -> bytes:
+        result = subprocess.run(
+            ["git", "--no-optional-locks", "-C", str(root), *args],
+            input=input_bytes,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if result.returncode not in {0, 1}:
+            raise MigrationError(
+                f"Cannot verify freeze ignore policy: local Git check exited {result.returncode}"
+            )
+        return result.stdout
+
+    repository = Path(os.fsdecode(git("rev-parse", "--show-toplevel")).strip())
+    for path in (root, *root.parents):
+        if path.is_relative_to(repository):
+            retain_policy(path / ".gitignore")
+    for name in ("info/exclude", "config", "config.worktree", "HEAD"):
+        retain_policy(
+            absolute_path(root / os.fsdecode(git("rev-parse", "--git-path", name)).strip())
+        )
+    config = git("config", "--show-origin", "--list").decode("utf-8")
+    for line in config.splitlines():
+        origin, separator, entry = line.partition("\t")
+        if not separator or not origin.startswith("file:"):
+            raise MigrationError(
+                "Cannot verify freeze ignore policy from non-file Git configuration"
+            )
+        config_file = absolute_path(root / Path(origin[5:]).expanduser())
+        retain_policy(config_file)
+        key, _, value = entry.partition("=")
+        if key.lower().startswith("includeif."):
+            raise MigrationError(
+                "Cannot verify freeze ignore policy with conditional Git includes; "
+                "use unconditional policy configuration and preview again"
+            )
+        if key.lower() == "include.path":
+            retain_policy(absolute_path(config_file.parent / Path(value).expanduser()))
+    user_root = Path.home()
+    xdg = Path(os.environ.get("XDG_CONFIG_HOME", str(user_root / ".config")))
+    global_config = os.environ.get("GIT_CONFIG_GLOBAL")
+    defaults = [xdg / "git/ignore"]
+    defaults.extend(
+        [Path(global_config)] if global_config else [user_root / ".gitconfig", xdg / "git/config"]
+    )
+    for path in defaults:
+        retain_policy(path)
+    excludes = os.fsdecode(git("config", "--path", "--get", "core.excludesFile")).strip()
+    if excludes:
+        retain_policy(absolute_path(root / Path(excludes).expanduser()))
+    queries = [
+        str(path.relative_to(root)) + ("/" if before.is_dir() or before == source else "")
+        for before, after in pairs
+        for path in (before, after)
+    ]
+    ignored = set(
+        git(
+            "check-ignore",
+            "--no-index",
+            "-z",
+            "--stdin",
+            input_bytes=b"\0".join(os.fsencode(path) for path in queries) + b"\0",
+        ).split(b"\0")
+    )
+    for index in range(0, len(queries), 2):
+        before, after = queries[index : index + 2]
+        if (os.fsencode(before) in ignored) != (os.fsencode(after) in ignored):
+            raise MigrationError(
+                f"Migration would change freeze ignore policy: {before} -> {after}. "
+                "Adjust destination .gitignore rules to preserve ignored files and "
+                "tracked exceptions, then preview again"
+            )
 
 
 def _overlaps(left: Path, right: Path) -> bool:
@@ -208,6 +329,27 @@ def analyse(layout: Layout, destination: Path) -> Migration:
             return True
         except (OSError, MigrationError) as error:
             blockers.append(f"Cannot inspect {path}: {error}")
+            return False
+
+    def retain_policy(path: Path) -> bool:
+        if path.is_relative_to(root):
+            return retain(path)
+        seen: set[Path] = set()
+        try:
+            while True:
+                link = next(
+                    (part for part in reversed((path, *path.parents)) if part.is_symlink()), None
+                )
+                if link is None:
+                    return retain(path)
+                if link in seen:
+                    raise MigrationError(f"Ignore policy contains a symlink cycle: {link}")
+                seen.add(link)
+                fingerprints[link] = fingerprint(link)
+                target = absolute_path(link.parent / os.readlink(link))
+                path = target / path.relative_to(link)
+        except (OSError, MigrationError) as error:
+            blockers.append(f"Cannot inspect ignore policy {path}: {error}")
             return False
 
     if layout.source_dir != root:
@@ -462,6 +604,7 @@ def analyse(layout: Layout, destination: Path) -> Migration:
 
     freeze = root / "_freeze"
     target_freeze = destination / "_freeze"
+    freeze_paths: set[Path] = set()
     retain(freeze)
     if target_freeze.exists() or target_freeze.is_symlink():
         blockers.append(f"Destination cache already exists: {target_freeze}")
@@ -469,6 +612,7 @@ def analyse(layout: Layout, destination: Path) -> Migration:
         if not freeze.is_dir():
             blockers.append(f"Persistent cache must be a directory: {freeze}")
         moves.append(Move(freeze, target_freeze))
+        freeze_paths.update(path.relative_to(freeze) for path in freeze.rglob("*"))
     else:
         recovered: dict[Path, bytes] = {}
         for build in generated:
@@ -484,6 +628,12 @@ def analyse(layout: Layout, destination: Path) -> Migration:
             if any(parent in recovered for parent in path.parents):
                 blockers.append(f"Recovered cache files overlap a directory: {path}")
             edits.append(Edit(path, None, content))
+            freeze_paths.add(path.relative_to(target_freeze))
+    if freeze.exists() or freeze_paths:
+        try:
+            _check_freeze_ignore_policy(root, destination, freeze_paths, retain, retain_policy)
+        except (OSError, UnicodeError, MigrationError) as error:
+            blockers.append(str(error))
     for build in generated:
         retain(build / "_quarto.yml")
         follow_up.append(
