@@ -30,6 +30,7 @@ from yaml12 import format_yaml as _format_yaml
 from yaml12 import parse_yaml as _parse_yaml
 
 from great_docs import Config, GreatDocs, create_default_config, load_config
+from great_docs._content_naming import fix_numeric_prefix_links, strip_numeric_prefix
 from great_docs._apiref import _globals, content, spec, write
 from great_docs._apiref._docstring_sections import (
     DCDocstringSection,
@@ -2583,9 +2584,9 @@ def test_strip_numeric_prefix_single_digit():
 
         docs = GreatDocs(project_path=tmp_dir)
 
-        assert docs._strip_numeric_prefix("1-getting-started.qmd") == "getting-started.qmd"
-        assert docs._strip_numeric_prefix("2-configuration.qmd") == "configuration.qmd"
-        assert docs._strip_numeric_prefix("9-advanced.qmd") == "advanced.qmd"
+        assert strip_numeric_prefix("1-getting-started.qmd") == "getting-started.qmd"
+        assert strip_numeric_prefix("2-configuration.qmd") == "configuration.qmd"
+        assert strip_numeric_prefix("9-advanced.qmd") == "advanced.qmd"
 
 
 def test_strip_numeric_prefix_two_digit():
@@ -2596,11 +2597,11 @@ def test_strip_numeric_prefix_two_digit():
 
         docs = GreatDocs(project_path=tmp_dir)
 
-        assert docs._strip_numeric_prefix("00-introduction.qmd") == "introduction.qmd"
-        assert docs._strip_numeric_prefix("01-installation.qmd") == "installation.qmd"
-        assert docs._strip_numeric_prefix("09-conclusion.qmd") == "conclusion.qmd"
-        assert docs._strip_numeric_prefix("10-appendix.qmd") == "appendix.qmd"
-        assert docs._strip_numeric_prefix("99-final.qmd") == "final.qmd"
+        assert strip_numeric_prefix("00-introduction.qmd") == "introduction.qmd"
+        assert strip_numeric_prefix("01-installation.qmd") == "installation.qmd"
+        assert strip_numeric_prefix("09-conclusion.qmd") == "conclusion.qmd"
+        assert strip_numeric_prefix("10-appendix.qmd") == "appendix.qmd"
+        assert strip_numeric_prefix("99-final.qmd") == "final.qmd"
 
 
 def test_strip_numeric_prefix_three_digit():
@@ -2611,9 +2612,9 @@ def test_strip_numeric_prefix_three_digit():
 
         docs = GreatDocs(project_path=tmp_dir)
 
-        assert docs._strip_numeric_prefix("001-overview.qmd") == "overview.qmd"
-        assert docs._strip_numeric_prefix("010-details.qmd") == "details.qmd"
-        assert docs._strip_numeric_prefix("0100-reference.qmd") == "reference.qmd"
+        assert strip_numeric_prefix("001-overview.qmd") == "overview.qmd"
+        assert strip_numeric_prefix("010-details.qmd") == "details.qmd"
+        assert strip_numeric_prefix("0100-reference.qmd") == "reference.qmd"
 
 
 def test_strip_numeric_prefix_underscore():
@@ -2624,8 +2625,8 @@ def test_strip_numeric_prefix_underscore():
 
         docs = GreatDocs(project_path=tmp_dir)
 
-        assert docs._strip_numeric_prefix("01_introduction.qmd") == "introduction.qmd"
-        assert docs._strip_numeric_prefix("1_getting_started.qmd") == "getting_started.qmd"
+        assert strip_numeric_prefix("01_introduction.qmd") == "introduction.qmd"
+        assert strip_numeric_prefix("1_getting_started.qmd") == "getting_started.qmd"
 
 
 def test_strip_numeric_prefix_no_prefix():
@@ -2636,9 +2637,9 @@ def test_strip_numeric_prefix_no_prefix():
 
         docs = GreatDocs(project_path=tmp_dir)
 
-        assert docs._strip_numeric_prefix("introduction.qmd") == "introduction.qmd"
-        assert docs._strip_numeric_prefix("index.qmd") == "index.qmd"
-        assert docs._strip_numeric_prefix("getting-started.qmd") == "getting-started.qmd"
+        assert strip_numeric_prefix("introduction.qmd") == "introduction.qmd"
+        assert strip_numeric_prefix("index.qmd") == "index.qmd"
+        assert strip_numeric_prefix("getting-started.qmd") == "getting-started.qmd"
 
 
 def test_strip_numeric_prefix_preserves_internal_numbers():
@@ -2649,8 +2650,8 @@ def test_strip_numeric_prefix_preserves_internal_numbers():
 
         docs = GreatDocs(project_path=tmp_dir)
 
-        assert docs._strip_numeric_prefix("01-python3-setup.qmd") == "python3-setup.qmd"
-        assert docs._strip_numeric_prefix("02-chapter-10.qmd") == "chapter-10.qmd"
+        assert strip_numeric_prefix("01-python3-setup.qmd") == "python3-setup.qmd"
+        assert strip_numeric_prefix("02-chapter-10.qmd") == "chapter-10.qmd"
 
 
 def test_fix_numeric_prefix_links_basic():
@@ -2662,7 +2663,7 @@ def test_fix_numeric_prefix_links_basic():
         docs = GreatDocs(project_path=tmp_dir)
 
         content = "- [Theming](11-theming.qmd): customize colors"
-        result = docs._fix_numeric_prefix_links(content)
+        result = fix_numeric_prefix_links(content)
         assert result == "- [Theming](theming.qmd): customize colors"
 
 
@@ -2675,11 +2676,11 @@ def test_fix_numeric_prefix_links_with_anchors():
         docs = GreatDocs(project_path=tmp_dir)
 
         assert (
-            docs._fix_numeric_prefix_links("[Config](05-configuration.qmd#options)")
+            fix_numeric_prefix_links("[Config](05-configuration.qmd#options)")
             == "[Config](configuration.qmd#options)"
         )
         assert (
-            docs._fix_numeric_prefix_links("[Config](05-configuration.qmd?v=2)")
+            fix_numeric_prefix_links("[Config](05-configuration.qmd?v=2)")
             == "[Config](configuration.qmd?v=2)"
         )
 
@@ -2693,13 +2694,13 @@ def test_fix_numeric_prefix_links_skips_absolute_urls():
         docs = GreatDocs(project_path=tmp_dir)
 
         content = "[Docs](https://example.com/11-theming.qmd)"
-        assert docs._fix_numeric_prefix_links(content) == content
+        assert fix_numeric_prefix_links(content) == content
 
         content_http = "[Docs](http://example.com/05-config.qmd)"
-        assert docs._fix_numeric_prefix_links(content_http) == content_http
+        assert fix_numeric_prefix_links(content_http) == content_http
 
         content_abs = "[Docs](/root/11-theming.qmd)"
-        assert docs._fix_numeric_prefix_links(content_abs) == content_abs
+        assert fix_numeric_prefix_links(content_abs) == content_abs
 
 
 def test_fix_numeric_prefix_links_no_prefix():
@@ -2711,7 +2712,7 @@ def test_fix_numeric_prefix_links_no_prefix():
         docs = GreatDocs(project_path=tmp_dir)
 
         content = "[Theming](theming.qmd)"
-        assert docs._fix_numeric_prefix_links(content) == content
+        assert fix_numeric_prefix_links(content) == content
 
 
 def test_fix_numeric_prefix_links_subdirectory():
@@ -2723,7 +2724,7 @@ def test_fix_numeric_prefix_links_subdirectory():
         docs = GreatDocs(project_path=tmp_dir)
 
         content = "[Guide](01-getting-started/02-install.qmd)"
-        result = docs._fix_numeric_prefix_links(content)
+        result = fix_numeric_prefix_links(content)
         assert result == "[Guide](getting-started/install.qmd)"
 
 
@@ -2740,7 +2741,7 @@ def test_fix_numeric_prefix_links_multiple():
             "- [Config](05-configuration.qmd): options\n"
             "- [Building](13-building.qmd): build pipeline"
         )
-        result = docs._fix_numeric_prefix_links(content)
+        result = fix_numeric_prefix_links(content)
         assert result == (
             "- [Theming](theming.qmd): colors\n"
             "- [Config](configuration.qmd): options\n"
@@ -2757,10 +2758,10 @@ def test_fix_numeric_prefix_links_ignores_non_qmd():
         docs = GreatDocs(project_path=tmp_dir)
 
         content = "[Image](11-diagram.png)"
-        assert docs._fix_numeric_prefix_links(content) == content
+        assert fix_numeric_prefix_links(content) == content
 
         content_html = "[Page](11-theming.html)"
-        assert docs._fix_numeric_prefix_links(content_html) == content_html
+        assert fix_numeric_prefix_links(content_html) == content_html
 
 
 def test_user_guide_files_renamed_on_copy():
@@ -12954,10 +12955,10 @@ def test_strip_numeric_prefix_various():
     with tempfile.TemporaryDirectory() as tmp_dir:
         docs = GreatDocs(project_path=tmp_dir)
 
-        assert docs._strip_numeric_prefix("01-intro.qmd") == "intro.qmd"
-        assert docs._strip_numeric_prefix("99_advanced.qmd") == "advanced.qmd"
-        assert docs._strip_numeric_prefix("no-prefix.qmd") == "no-prefix.qmd"
-        assert docs._strip_numeric_prefix("001-triple.qmd") == "triple.qmd"
+        assert strip_numeric_prefix("01-intro.qmd") == "intro.qmd"
+        assert strip_numeric_prefix("99_advanced.qmd") == "advanced.qmd"
+        assert strip_numeric_prefix("no-prefix.qmd") == "no-prefix.qmd"
+        assert strip_numeric_prefix("001-triple.qmd") == "triple.qmd"
 
 
 def test_normalize_package_name_v2():
@@ -20466,9 +20467,9 @@ def test_strip_numeric_prefix():
     """Test _strip_numeric_prefix removes numeric prefixes."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         docs = GreatDocs(project_path=tmp_dir)
-        assert docs._strip_numeric_prefix("01-intro.qmd") == "intro.qmd"
-        assert docs._strip_numeric_prefix("10-advanced.qmd") == "advanced.qmd"
-        assert docs._strip_numeric_prefix("no-prefix.qmd") == "no-prefix.qmd"
+        assert strip_numeric_prefix("01-intro.qmd") == "intro.qmd"
+        assert strip_numeric_prefix("10-advanced.qmd") == "advanced.qmd"
+        assert strip_numeric_prefix("no-prefix.qmd") == "no-prefix.qmd"
 
 
 def test_rewrite_sidebar_first_entry():
@@ -23593,9 +23594,9 @@ def test_strip_numeric_prefix_basic():
     """Test _strip_numeric_prefix removes numeric prefixes."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         docs = GreatDocs(project_path=tmp_dir)
-        assert docs._strip_numeric_prefix("01-introduction.qmd") == "introduction.qmd"
-        assert docs._strip_numeric_prefix("10-advanced.qmd") == "advanced.qmd"
-        assert docs._strip_numeric_prefix("readme.qmd") == "readme.qmd"
+        assert strip_numeric_prefix("01-introduction.qmd") == "introduction.qmd"
+        assert strip_numeric_prefix("10-advanced.qmd") == "advanced.qmd"
+        assert strip_numeric_prefix("readme.qmd") == "readme.qmd"
 
 
 def test_get_quarto_env():
@@ -27648,7 +27649,7 @@ def test_create_blended_index_creates_index():
             patch.object(docs, "_add_frontmatter_option", side_effect=lambda c, k, v: c),
             patch.object(docs, "_build_metadata_margin", return_value=""),
             patch.object(docs, "_build_hero_section", return_value=("", None)),
-            patch.object(docs, "_strip_numeric_prefix", return_value="intro.qmd"),
+            patch("great_docs.core.strip_numeric_prefix", return_value="intro.qmd"),
         ):
             docs._create_blended_index(ug_info, [])
 
@@ -44027,28 +44028,28 @@ def test_html_escape_no_special():
 
 def test_strip_numeric_prefix_double_digit():
     docs = GreatDocs()
-    assert docs._strip_numeric_prefix("00-introduction.qmd") == "introduction.qmd"
+    assert strip_numeric_prefix("00-introduction.qmd") == "introduction.qmd"
 
 
 def test_strip_numeric_prefix_single_digit():
     docs = GreatDocs()
-    assert docs._strip_numeric_prefix("1-getting-started.qmd") == "getting-started.qmd"
+    assert strip_numeric_prefix("1-getting-started.qmd") == "getting-started.qmd"
 
 
 def test_strip_numeric_prefix_no_prefix():
     docs = GreatDocs()
-    assert docs._strip_numeric_prefix("introduction.qmd") == "introduction.qmd"
+    assert strip_numeric_prefix("introduction.qmd") == "introduction.qmd"
 
 
 def test_strip_numeric_prefix_underscore_separator():
     docs = GreatDocs()
-    result = docs._strip_numeric_prefix("01_getting_started.qmd")
+    result = strip_numeric_prefix("01_getting_started.qmd")
     assert result == "getting_started.qmd"
 
 
 def test_strip_numeric_prefix_preserves_non_numeric():
     docs = GreatDocs()
-    assert docs._strip_numeric_prefix("advanced.qmd") == "advanced.qmd"
+    assert strip_numeric_prefix("advanced.qmd") == "advanced.qmd"
 
 
 # ---------------------------------------------------------------------------
