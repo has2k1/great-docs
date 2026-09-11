@@ -25,7 +25,14 @@ from great_docs._utils import QUARTO_YML_HEADER
 
 @pytest.mark.parametrize("directory", [".", "docs", "website"])
 @pytest.mark.parametrize("check", ["ambiguous-xref", "stale-badge"])
-def test_lint_includes_shared_sources(tmp_path: Path, directory: str, check: str) -> None:
+@pytest.mark.parametrize("relative", [False, True])
+def test_lint_includes_shared_sources(
+    tmp_path: Path,
+    directory: str,
+    check: str,
+    relative: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from great_docs._layout import Layout
     from great_docs._lint import (
         _check_ambiguous_references,
@@ -54,16 +61,18 @@ def test_lint_includes_shared_sources(tmp_path: Path, directory: str, check: str
         (build / "index.qmd").write_text(prose)
 
     result = LintResult()
+    monkeypatch.chdir(tmp_path)
+    project_root = Path(".") if relative else tmp_path
     expected = {"recipes/guide.qmd", str((source / "index.qmd").relative_to(tmp_path))}
     if check == "ambiguous-xref":
         _check_ambiguous_references(
             {"flush": ("sample.Memory.flush", "sample.Disk.flush")},
-            _gather_prose([], tmp_path, layout),
+            _gather_prose([], project_root, layout),
             result,
         )
         expected.add("README.md")
     else:
-        _check_stale_versions(tmp_path, result, layout)
+        _check_stale_versions(project_root, result, layout)
     assert {issue.symbol.split(":")[0] for issue in result.issues if issue.check == check} == expected
 
 
