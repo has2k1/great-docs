@@ -12,6 +12,7 @@ from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 from yaml12 import format_yaml, parse_yaml, read_yaml, write_yaml
 
+from ._content_naming import fix_numeric_prefix_links, section_slug, strip_numeric_prefix
 from ._layout import Layout, LayoutError
 from ._source_refs import source_reference_spans
 from ._subprocess import TEXT_MODE_KWARGS
@@ -849,7 +850,7 @@ class GreatDocs:
             if source.is_relative_to(directory.resolve()):
                 relative = source.relative_to(directory.resolve())
                 if strip_prefix:
-                    relative = Path(*(self._strip_numeric_prefix(part) for part in relative.parts))
+                    relative = Path(*(strip_numeric_prefix(part) for part in relative.parts))
                 return destination / relative
         return None
 
@@ -2399,7 +2400,7 @@ class GreatDocs:
                 if resolved.is_relative_to(self.layout.package_root)
                 else Path(source.name)
             )
-        slug = source.as_posix().replace("_", "-").replace(" ", "-").lower()
+        slug = section_slug(source.as_posix())
         return self._output_directory(slug)
 
     def _output_directory(self, output: str) -> Path:
@@ -3306,7 +3307,7 @@ class GreatDocs:
             rel = src_file.relative_to(source_dir)
 
             # Strip numeric prefix from filename (e.g., 01-intro.qmd -> intro.qmd)
-            clean_name = self._strip_numeric_prefix(rel.name)
+            clean_name = strip_numeric_prefix(rel.name)
 
             # Strip numeric prefixes from subdirectory parts too (e.g.,
             # 02-topic-b/page.qmd -> topic-b/page.qmd), mirroring the user-guide
@@ -3314,7 +3315,7 @@ class GreatDocs:
             # by _fix_numeric_prefix_links, which strips prefixes from every path
             # component.
             clean_parent = (
-                Path(*[self._strip_numeric_prefix(p) for p in rel.parent.parts])
+                Path(*[strip_numeric_prefix(p) for p in rel.parent.parts])
                 if rel.parent.parts
                 else rel.parent
             )
@@ -3330,7 +3331,7 @@ class GreatDocs:
             content = self._rebase_source_references(content, src_file, dest_file)
 
             # Fix links to .qmd files with numeric prefixes
-            content = self._fix_numeric_prefix_links(content)
+            content = fix_numeric_prefix_links(content)
 
             # Parse frontmatter for metadata
             title = clean_name.replace(".qmd", "").replace(".md", "").replace("-", " ").title()
@@ -3784,7 +3785,7 @@ class GreatDocs:
             # encounter order already reflects the author's intended ordering.
             # Sorting here would use the prefix-stripped names and lose it.
             for subdir in subdir_groups_dict:
-                clean_subdir = self._strip_numeric_prefix(subdir)  # pragma: no cover
+                clean_subdir = strip_numeric_prefix(subdir)  # pragma: no cover
                 section_title = dir_titles.get(  # pragma: no cover
                     clean_subdir,
                     clean_subdir.replace("-", " ").replace("_", " ").title(),
@@ -5764,64 +5765,6 @@ class GreatDocs:
             "frontmatter": frontmatter,
         }
 
-    def _strip_numeric_prefix(self, filename: str) -> str:
-        """
-        Strip numeric ordering prefix from a filename.
-
-        Handles common patterns like:
-
-        - 00-introduction.qmd -> introduction.qmd
-        - 01-installation.qmd -> installation.qmd
-        - 1-getting-started.qmd -> getting-started.qmd
-        - 0001-overview.qmd -> overview.qmd
-
-        Parameters
-        ----------
-        filename
-            The filename to process.
-
-        Returns
-        -------
-        str
-            The filename with numeric prefix stripped, or unchanged if no prefix.
-        """
-        # Pattern matches: digits followed by a hyphen or underscore at the start
-        # e.g., "00-", "01-", "1-", "0001-", "00_", etc.
-        pattern = r"^\d+-|^\d+_"
-        return re.sub(pattern, "", filename)
-
-    def _fix_numeric_prefix_links(self, content: str) -> str:
-        """
-        Rewrite relative Markdown links to `.qmd` files, stripping numeric prefixes.
-
-        When numeric prefixes are stripped from filenames during the copy step (e.g.,
-        `11-theming.qmd` -> `theming.qmd`), any cross-references between pages that use the original
-        prefixed names would break. This method fixes those links so authors can write
-        `[Theming](11-theming.qmd)` in source and it resolves correctly in the rendered site.
-
-        Only relative links to `.qmd` files are affected; absolute URLs and anchors are left
-        untouched.
-        """
-
-        def _rewrite(m: re.Match) -> str:
-            path = m.group(1)
-            # Split off anchor / query string
-            anchor = ""
-            for sep in ("#", "?"):
-                idx = path.find(sep)
-                if idx != -1:
-                    anchor = path[idx:]
-                    path = path[:idx]
-                    break
-            # Strip numeric prefix from each path component
-            parts = path.split("/")
-            clean_parts = [re.sub(r"^\d+[-_]", "", p) for p in parts]
-            return "](" + "/".join(clean_parts) + anchor + ")"
-
-        # Match markdown link targets that are relative paths ending in .qmd
-        # (skip absolute URLs starting with http://, https://, or /)
-        return re.sub(r"\]\((?!https?://|/)([^)]+\.qmd(?:[#?][^)]*)?)\)", _rewrite, content)
-
     def _copy_user_guide_to_docs(self, user_guide_info: dict) -> list[str]:
         """
         Copy user guide files from project root to docs directory.
@@ -5867,7 +5810,7 @@ class GreatDocs:
             else:
                 # Auto-discovery mode: strip numeric prefixes from both
                 # directory names and filenames for cleaner URLs
-                clean_parts = [self._strip_numeric_prefix(part) for part in rel_path.parts]
+                clean_parts = [strip_numeric_prefix(part) for part in rel_path.parts]
                 dest_rel_path = Path(*clean_parts) if clean_parts else rel_path
 
             dst_path = target_dir / dest_rel_path
@@ -5884,7 +5827,7 @@ class GreatDocs:
 
             # In auto-discovery mode, fix links to .qmd files with numeric prefixes
             if not is_explicit:
-                content = self._fix_numeric_prefix_links(content)
+                content = fix_numeric_prefix_links(content)
 
             # Add bread-crumbs: false to frontmatter
             content = self._add_frontmatter_option(content, "bread-crumbs", False)
@@ -6341,7 +6284,7 @@ class GreatDocs:
         # Helper to get clean href (strips numeric prefixes for cleaner URLs)
         def get_clean_href(file_info: dict) -> str:
             rel_path = file_info["path"].relative_to(source_dir)
-            clean_parts = [self._strip_numeric_prefix(part) for part in rel_path.parts]
+            clean_parts = [strip_numeric_prefix(part) for part in rel_path.parts]
             clean_rel_path = Path(*clean_parts) if clean_parts else rel_path
             return f"user-guide/{clean_rel_path}"
 
@@ -6452,7 +6395,7 @@ class GreatDocs:
                         _, _, subdir, dir_files = item
                         # Use the index.qmd title as the section title if present,
                         # otherwise derive from the directory name
-                        clean_subdir = self._strip_numeric_prefix(subdir)
+                        clean_subdir = strip_numeric_prefix(subdir)
                         section_title = clean_subdir.replace("-", " ").replace("_", " ").title()
                         section_contents = []
                         for file_info in dir_files:
@@ -6585,7 +6528,7 @@ class GreatDocs:
                         # Use the first file with clean filename
                         first_file = user_guide_info["files"][0]
                         rel_path = first_file["path"].relative_to(user_guide_info["source_dir"])
-                        clean_filename = self._strip_numeric_prefix(rel_path.name)
+                        clean_filename = strip_numeric_prefix(rel_path.name)
                         clean_rel_path = rel_path.parent / clean_filename
                         user_guide_href = f"user-guide/{clean_rel_path}"
 
@@ -6682,7 +6625,7 @@ class GreatDocs:
         if is_explicit:
             dest_rel = rel_path
         else:
-            clean_parts = [self._strip_numeric_prefix(part) for part in rel_path.parts]
+            clean_parts = [strip_numeric_prefix(part) for part in rel_path.parts]
             dest_rel = Path(*clean_parts) if clean_parts else rel_path
 
         first_ug_path = self.build_dir / "user-guide" / dest_rel
