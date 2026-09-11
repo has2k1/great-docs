@@ -72,17 +72,22 @@ class Config:
     with sensible defaults.
     """
 
-    def __init__(self, project_root: Path):
+    def __init__(self, project_root: Path, *, config_path: Path | None = None):
         """
-        Initialize configuration from great-docs.yml.
+        Initialise configuration from `great-docs.yml`
 
         Parameters
         ----------
         project_root
-            Path to the project root directory where great-docs.yml is located.
+            Package root used for repository-scoped caches.
+        config_path
+            Configuration file to load. Defaults to `great-docs.yml` at the
+            package root.
         """
         self.project_root = project_root
-        self.config_path = project_root / "great-docs.yml"
+        self.config_path = (
+            config_path if config_path is not None else project_root / "great-docs.yml"
+        )
         self.cache_dir = project_root / ".great-docs-cache"
         self._config = self._load_config()
 
