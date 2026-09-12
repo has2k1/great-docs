@@ -35,9 +35,19 @@ class ContentDirectory:
     strip_prefix: bool
 
 
-def _denormalize(target: Path, content_directories: tuple[ContentDirectory, ...]) -> Path | None:
+def _denormalize(
+    target: Path, content_directories: tuple[ContentDirectory, ...], moves: tuple[Move, ...]
+) -> tuple[Path, Path] | None:
     """
     Resolve a target through the build's own directory rename and prefix rule
+
+    Return both the real, on-disk source file (to fingerprint and validate
+    against) and the target's republished path: the same renamed/stripped
+    shape the reference was written in, relocated only by however much its
+    content directory itself moves. The build reapplies that rename and
+    prefix strip regardless of where the source directory lives, so
+    rewriting through the real, still-prefixed filename would silently
+    reinstate or remove a transform the reference never asked for.
 
     Parameters
     ----------
@@ -45,27 +55,32 @@ def _denormalize(target: Path, content_directories: tuple[ContentDirectory, ...]
         A path that does not exist literally on disk.
     content_directories
         Recognised content roots, in the shape `analyse()` builds them.
+    moves
+        The migration's directory moves, used to relocate the republished path.
 
     Returns
     -------
-    Path | None
-        The real source file the target corresponds to, or `None` if it
-        doesn't match any recognised content directory.
+    tuple[Path, Path] | None
+        `(real_source_file, republished_path)`, or `None` if `target` doesn't
+        match any recognised content directory.
     """
     for directory in content_directories:
         root = directory.source.parent
         renamed = root / directory.output_name
         if target.is_relative_to(renamed):
             relative = target.relative_to(renamed)
+            republished_root = moved_path(directory.source, moves).parent / directory.output_name
         elif target.is_relative_to(directory.source):
             relative = target.relative_to(directory.source)
+            republished_root = moved_path(directory.source, moves)
         else:
             continue
         if not relative.parts:
             return None
+        republished = republished_root / relative
         if not directory.strip_prefix:
             candidate = directory.source / relative
-            return candidate if candidate.is_file() else None
+            return (candidate, republished) if candidate.is_file() else None
         current = directory.source
         for part in relative.parts[:-1]:
             if not current.is_dir():
@@ -87,7 +102,7 @@ def _denormalize(target: Path, content_directories: tuple[ContentDirectory, ...]
             for child in current.iterdir()
             if child.is_file() and strip_numeric_prefix(child.name) in stems
         ]
-        return matches[0] if len(matches) == 1 else None
+        return (matches[0], republished) if len(matches) == 1 else None
     return None
 
 
@@ -374,6 +389,7 @@ def rewrite_document(
             continue
         target = absolute_path(source.parent / unquote(url.path))
         input_target = target
+        republished: Path | None = None
         try:
             check_symlinks(source.parent / unquote(url.path))
             check_symlinks(target)
@@ -387,30 +403,35 @@ def rewrite_document(
             if not target.exists() and target.suffix.lower() == ".html":
                 candidates = [target.with_suffix(suffix) for suffix in (".qmd", ".md")]
                 matches = [candidate for candidate in candidates if candidate.is_file()]
-                if not matches:
-                    matches = list(
-                        dict.fromkeys(
-                            resolved
-                            for resolved in (
-                                _denormalize(candidate, content_directories)
-                                for candidate in candidates
-                            )
-                            if resolved is not None
+                if matches:
+                    if len(matches) == 1:
+                        input_target = matches[0]
+                        check_symlinks(input_target)
+                    else:
+                        raise MigrationError(
+                            f"Cannot resolve rendered page reference in {source}: {value}"
                         )
-                    )
-                if len(matches) == 1:
-                    input_target = matches[0]
-                    check_symlinks(input_target)
-                elif not matches and _GENERATED_REFERENCE.fullmatch(unquote(url.path)):
-                    continue
                 else:
-                    raise MigrationError(
-                        f"Cannot resolve rendered page reference in {source}: {value}"
-                    )
+                    resolved = {
+                        found[0]: found[1]
+                        for candidate in candidates
+                        if (found := _denormalize(candidate, content_directories, moves))
+                        is not None
+                    }
+                    if len(resolved) == 1:
+                        input_target, republished = next(iter(resolved.items()))
+                        republished = republished.with_suffix(target.suffix)
+                        check_symlinks(input_target)
+                    elif not resolved and _GENERATED_REFERENCE.fullmatch(unquote(url.path)):
+                        continue
+                    else:
+                        raise MigrationError(
+                            f"Cannot resolve rendered page reference in {source}: {value}"
+                        )
             if not input_target.exists():
-                denormalized = _denormalize(input_target, content_directories)
+                denormalized = _denormalize(input_target, content_directories, moves)
                 if denormalized is not None:
-                    input_target = denormalized
+                    input_target, republished = denormalized
                     check_symlinks(input_target)
                 elif _GENERATED_REFERENCE.fullmatch(unquote(url.path)):
                     # Generated API pages have published identities but no repository source.
@@ -421,20 +442,12 @@ def rewrite_document(
             blockers.append(str(error))
             continue
         inputs.add(input_target)
-        moved = moved_path(input_target, moves)
-        if input_target != target:
-            moved = moved.with_suffix(target.suffix)
-        for directory in content_directories:
-            if input_target.is_relative_to(directory.source) and directory.strip_prefix:
-                # The build strips numeric prefixes from every path component in
-                # this directory (core.py's `_source_page_destination`), so the
-                # published (and hence correct) reference never carries one,
-                # however the retained source file happens to be named.
-                destination_root = moved_path(directory.source, moves)
-                relative = moved.relative_to(destination_root)
-                stripped = Path(*(strip_numeric_prefix(part) for part in relative.parts))
-                moved = destination_root / stripped
-                break
+        if republished is not None:
+            moved = republished
+        else:
+            moved = moved_path(input_target, moves)
+            if input_target != target:
+                moved = moved.with_suffix(target.suffix)
         candidate = absolute_path(relocated.parent / unquote(url.path))
         if candidate == moved:
             continue

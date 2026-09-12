@@ -317,7 +317,7 @@ def test_renamed_directory_html_reference_resolves(tmp_path: Path) -> None:
     )
     assert not blockers
     assert guide / "11-theming.qmd" in inputs
-    assert result == "[Theming](../user_guide/theming.html)"
+    assert result == "[Theming](../user-guide/theming.html)"
 
 
 def test_numeric_prefix_reference_resolves_across_nested_directories(tmp_path: Path) -> None:
