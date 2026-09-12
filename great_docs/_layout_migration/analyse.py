@@ -49,6 +49,7 @@ _RESERVED = {
     "_freeze",
     "tests",
     "test-packages",
+    "scripts",
 }
 
 
@@ -368,9 +369,14 @@ def _exclusive_to_moving_content(
     moves: list[Move],
     content_directories: tuple[ContentDirectory, ...],
     generated: list[Path],
+    blockers: list[str],
 ) -> set[Path]:
     """Return which candidates are referenced only from content already moving"""
-    ignored = _ignored_paths(root)
+    try:
+        ignored = _ignored_paths(root)
+    except (OSError, MigrationError) as error:
+        blockers.append(f"Cannot inspect git ignore rules: {error}")
+        ignored = None
     non_moving: set[Path] = set()
     for directory, children, names in os.walk(root, followlinks=False):
         parent = Path(directory)
@@ -408,26 +414,59 @@ def _exclusive_to_moving_content(
     return {candidate for candidate in candidates if candidate not in referenced_externally}
 
 
+def _categorize_move_contents(
+    move: Move,
+    config_path: Path,
+    documents: set[Path],
+    blockers: list[str],
+    follow_up: list[str],
+) -> None:
+    """Classify every file a move brings in, the same way for every move"""
+    try:
+        for path in tree_files(move.source):
+            if path == config_path:
+                continue
+            if path.name == "__init__.py" or path.name in _MANIFESTS:
+                blockers.append(
+                    f"Documentation directory contains package sources or metadata: {path}"
+                )
+            if path.suffix.lower() in _DOCUMENT_SUFFIXES:
+                documents.add(path)
+            elif path.suffix.lower() in {".ipynb", ".py", ".r", ".jl"}:
+                follow_up.append(
+                    f"Review dynamic code, notebook references, and working-directory assumptions in {path}"
+                )
+            elif path.suffix.lower() in {".rst", ".termshow"}:
+                follow_up.append(
+                    f"Review unsupported document or companion-file references in {path}"
+                )
+    except (OSError, MigrationError) as error:
+        blockers.append(f"Cannot inspect {move.source}: {error}")
+
+
 def _fold_in_static_directories(
     root: Path,
     destination: Path,
+    config_path: Path,
     documents: set[Path],
     moves: list[Move],
     protected: list[Path],
     content_directories: tuple[ContentDirectory, ...],
     config_referenced: set[Path],
-    pinned_absolute: set[Path],
+    never_fold_in: set[Path],
     retain: Callable[[Path], bool],
     generated: list[Path],
+    blockers: list[str],
 ) -> list[str]:
     """
     Move a top-level directory into the destination when only moving content needs it
 
     Repeat until no further directory qualifies, since folding one directory
     in can pull its own files into `documents` and reveal new references. Fingerprint
-    every folded-in directory the same way the original move-set loop already is, since
-    that loop only runs over the *original* move-set, before this pass adds to it. Return
-    the follow-up notes for directories deliberately left in place.
+    and classify every folded-in directory the same way the original move-set loop
+    already does, since that loop only runs over the *original* move-set, before this
+    pass adds to it. Return the follow-up notes for directories deliberately left in
+    place, alongside the per-file notes the folded-in directories raise.
     """
     follow_up: list[str] = []
     folded: set[Path] = {move.source for move in moves}
@@ -453,13 +492,13 @@ def _fold_in_static_directories(
             candidate
             for candidate in candidates
             if not any(_overlaps(candidate, path) for path in protected)
-            and not any(_overlaps(candidate, path) for path in pinned_absolute)
+            and not any(_overlaps(candidate, path) for path in never_fold_in)
             and not _overlaps(candidate, destination)
         ]
         if not to_fold:
             break
         exclusive = _exclusive_to_moving_content(
-            to_fold, root, moves, content_directories, generated
+            to_fold, root, moves, content_directories, generated, blockers
         )
         for candidate in to_fold:
             if candidate not in exclusive:
@@ -468,12 +507,11 @@ def _fold_in_static_directories(
                 )
                 folded.add(candidate)
                 continue
-            moves.append(Move(candidate, destination / candidate.relative_to(root)))
+            move = Move(candidate, destination / candidate.relative_to(root))
+            moves.append(move)
             folded.add(candidate)
-            retain(candidate)
-            documents.update(
-                path for path in tree_files(candidate) if path.suffix.lower() in _DOCUMENT_SUFFIXES
-            )
+            if retain(candidate):
+                _categorize_move_contents(move, config_path, documents, blockers, follow_up)
     return follow_up
 
 
@@ -693,7 +731,10 @@ def analyse(layout: Layout, destination: Path) -> Migration:
         materialised, amended = text, config
     documents: set[Path] = set()
     config_referenced: set[Path] = set()
-    pinned_absolute: set[Path] = set()
+    # Directories that must never fold in, either because a config value pins them in
+    # place absolutely, or because an executable script path (`pre_render`) references
+    # them and a directory-level move wouldn't safely update that reference.
+    never_fold_in: set[Path] = set()
     for option, value in config_paths(amended):
         try:
             source = local_path(value, root)
@@ -704,7 +745,7 @@ def analyse(layout: Layout, destination: Path) -> Migration:
                 # (`_dedicated_directories` already excludes it from `selected`/`moves`
                 # on the same basis); folding it in would silently move something the
                 # author pinned in place, however it's discovered as a candidate.
-                pinned_absolute.add(source)
+                never_fold_in.add(source)
             else:
                 config_referenced.add(source)
             check_symlinks(root / value)
@@ -730,6 +771,7 @@ def analyse(layout: Layout, destination: Path) -> Migration:
                     f"An unchanged absolute reference would point into a moved source: {source}"
                 )
             if "pre_render" in option:
+                never_fold_in.add(source)
                 follow_up.append(f"Review working-directory assumptions in render script {source}")
         except (OSError, ValueError) as error:
             blockers.append(f"Cannot inspect configured input {option}: {error}")
@@ -737,26 +779,7 @@ def analyse(layout: Layout, destination: Path) -> Migration:
     for move in moves:
         if not retain(move.source):
             continue
-        try:
-            for path in tree_files(move.source):
-                if path == config_path:
-                    continue
-                if path.name == "__init__.py" or path.name in _MANIFESTS:
-                    blockers.append(
-                        f"Documentation directory contains package sources or metadata: {path}"
-                    )
-                if path.suffix.lower() in _DOCUMENT_SUFFIXES:
-                    documents.add(path)
-                elif path.suffix.lower() in {".ipynb", ".py", ".r", ".jl"}:
-                    follow_up.append(
-                        f"Review dynamic code, notebook references, and working-directory assumptions in {path}"
-                    )
-                elif path.suffix.lower() in {".rst", ".termshow"}:
-                    follow_up.append(
-                        f"Review unsupported document or companion-file references in {path}"
-                    )
-        except (OSError, MigrationError) as error:
-            blockers.append(f"Cannot inspect {move.source}: {error}")
+        _categorize_move_contents(move, config_path, documents, blockers, follow_up)
     for name in ("README.md", "README.rst", "index.qmd", "index.md"):
         path = root / name
         if path.is_file():
@@ -771,14 +794,16 @@ def analyse(layout: Layout, destination: Path) -> Migration:
         _fold_in_static_directories(
             root,
             destination,
+            config_path,
             documents,
             moves,
             protected,
             content_directories,
             config_referenced,
-            pinned_absolute,
+            never_fold_in,
             retain,
             generated,
+            blockers,
         )
     )
     try:
