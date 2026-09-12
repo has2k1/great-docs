@@ -47,7 +47,8 @@ _RESERVED = {
     "_quarto",
     "_site",
     "_freeze",
-    "assets",
+    "tests",
+    "test-packages",
 }
 
 
@@ -361,6 +362,116 @@ def _content_directories(config: dict[str, Any], root: Path) -> tuple[ContentDir
     return tuple(directories)
 
 
+def _exclusive_to_moving_content(
+    candidates: list[Path],
+    root: Path,
+    documents: set[Path],
+    moves: list[Move],
+    content_directories: tuple[ContentDirectory, ...],
+    generated: list[Path],
+) -> set[Path]:
+    """Return which candidates are referenced only from content already moving"""
+    non_moving: set[Path] = set()
+    ignored = _ignored_paths(root)
+    for directory, children, names in os.walk(root, followlinks=False):
+        parent = Path(directory)
+        children[:] = [name for name in children if _walk_into(parent / name, generated, ignored)]
+        if any(parent.is_relative_to(candidate) for candidate in candidates):
+            continue
+        for name in names:
+            path = parent / name
+            # A `documents` membership check is not enough here: `documents` also
+            # holds README-style files that are *edited in place* rather than moved
+            # (see `analyse`'s README loop), so it cannot distinguish moving content
+            # from content that merely stays put and gets its links patched. Whether
+            # a move would relocate the file is the only reliable test.
+            if (
+                path.suffix.lower() in _DOCUMENT_SUFFIXES
+                and moved_path(path, tuple(moves)) == path
+                and not path.is_symlink()
+            ):
+                non_moving.add(path)
+    referenced_externally: set[Path] = set()
+    for doc in non_moving:
+        try:
+            text = doc.read_bytes().decode("utf-8")
+        except (OSError, UnicodeError):
+            continue
+        _, inputs, _, _ = rewrite_document(text, doc, (), content_directories=content_directories)
+        for target in inputs:
+            for candidate in candidates:
+                if target.is_relative_to(candidate):
+                    referenced_externally.add(candidate)
+    return {candidate for candidate in candidates if candidate not in referenced_externally}
+
+
+def _fold_in_static_directories(
+    root: Path,
+    destination: Path,
+    documents: set[Path],
+    moves: list[Move],
+    protected: list[Path],
+    content_directories: tuple[ContentDirectory, ...],
+    config_referenced: set[Path],
+    retain: Callable[[Path], bool],
+    generated: list[Path],
+) -> list[str]:
+    """
+    Move a top-level directory into the destination when only moving content needs it
+
+    Repeat until no further directory qualifies, since folding one directory
+    in can pull its own files into `documents` and reveal new references. Fingerprint
+    every folded-in directory the same way the original move-set already is (`analyse`'s
+    per-move loop at `analyse.py:552-574` only runs over the *original* move-set, before
+    this pass adds to it). Return the follow-up notes for directories deliberately left
+    in place.
+    """
+    follow_up: list[str] = []
+    folded: set[Path] = {move.source for move in moves}
+    while True:
+        referenced: set[Path] = set(config_referenced)
+        for doc in sorted(documents):
+            try:
+                text = doc.read_bytes().decode("utf-8")
+            except (OSError, UnicodeError):
+                continue
+            _, inputs, _, _ = rewrite_document(
+                text, doc, tuple(moves), content_directories=content_directories
+            )
+            referenced.update(inputs)
+        candidates: dict[Path, Path] = {}
+        for target in referenced:
+            if not target.is_relative_to(root) or moved_path(target, tuple(moves)) != target:
+                continue
+            top = root / target.relative_to(root).parts[0]
+            if top not in folded and top.name not in _RESERVED and top.is_dir():
+                candidates[top] = top
+        to_fold = [
+            candidate
+            for candidate in candidates
+            if not any(_overlaps(candidate, path) for path in protected)
+        ]
+        if not to_fold:
+            break
+        exclusive = _exclusive_to_moving_content(
+            to_fold, root, documents, moves, content_directories, generated
+        )
+        for candidate in to_fold:
+            if candidate not in exclusive:
+                follow_up.append(
+                    f"Retain {candidate} in place; something outside the moving documentation still references it"
+                )
+                folded.add(candidate)
+                continue
+            moves.append(Move(candidate, destination / candidate.relative_to(root)))
+            folded.add(candidate)
+            retain(candidate)
+            documents.update(
+                path for path in tree_files(candidate) if path.suffix.lower() in _DOCUMENT_SUFFIXES
+            )
+    return follow_up
+
+
 def _walk_into(path: Path, generated: list[Path], ignored: frozenset[Path] | None) -> bool:
     """Whether a directory the implicit-input walk finds should be descended into"""
     return (
@@ -576,11 +687,18 @@ def analyse(layout: Layout, destination: Path) -> Migration:
         blockers.append(str(error))
         materialised, amended = text, config
     documents: set[Path] = set()
+    config_referenced: set[Path] = set()
     for option, value in config_paths(amended):
         try:
             source = local_path(value, root)
             if source is None:
                 continue
+            if not Path(value).is_absolute():
+                # An absolute config value is a deliberate opt-out of relocation
+                # (`_dedicated_directories` already excludes it from `selected`/`moves`
+                # on the same basis); folding it in would silently move something the
+                # author pinned in place.
+                config_referenced.add(source)
             check_symlinks(root / value)
             readable = retain(source)
             if (
@@ -607,12 +725,6 @@ def analyse(layout: Layout, destination: Path) -> Migration:
                 follow_up.append(f"Review working-directory assumptions in render script {source}")
         except (OSError, ValueError) as error:
             blockers.append(f"Cannot inspect configured input {option}: {error}")
-    try:
-        rewritten = rewrite_config(materialised, tuple(moves), root, destination).encode("utf-8")
-        if rewritten != before:
-            edits.append(Edit(config_path, before, rewritten))
-    except MigrationError as error:
-        blockers.append(str(error))
 
     for move in moves:
         if not retain(move.source):
@@ -647,6 +759,26 @@ def analyse(layout: Layout, destination: Path) -> Migration:
                 follow_up.append(
                     f"Review reStructuredText references to moved documentation in {path}"
                 )
+    follow_up.extend(
+        _fold_in_static_directories(
+            root,
+            destination,
+            documents,
+            moves,
+            protected,
+            content_directories,
+            config_referenced,
+            retain,
+            generated,
+        )
+    )
+    try:
+        rewritten = rewrite_config(materialised, tuple(moves), root, destination).encode("utf-8")
+        if rewritten != before:
+            edits.append(Edit(config_path, before, rewritten))
+    except MigrationError as error:
+        blockers.append(str(error))
+
     generated_homepage = None
     if not any((root / name).exists() for name in ("index.qmd", "index.md")) and any(
         (root / name).is_file() for name in ("README.md", "README.rst")
@@ -679,7 +811,7 @@ def analyse(layout: Layout, destination: Path) -> Migration:
 
     assets = root / "assets"
     referenced = set(fingerprints)
-    if assets.exists() and retain(assets):
+    if assets.exists() and assets not in {move.source for move in moves} and retain(assets):
         for path in tree_files(assets):
             if path not in referenced:
                 blockers.append(

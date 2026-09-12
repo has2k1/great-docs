@@ -203,7 +203,9 @@ bibliography: {shared}/references.bib
         assert not proposal.blockers, proposal.blockers
         apply(proposal)
         layout = Layout.make(root)
-        assert (root / "shared/picture.svg").read_text() == IMAGE
+        # Nothing outside the moving guide and configuration references `shared`,
+        # so it folds into the destination alongside them rather than staying put.
+        assert (root / "docs/shared/picture.svg").read_text() == IMAGE
         assert (root / "README.md").is_file()
     return Rendered(layout, tag, root / "executions.log")
 

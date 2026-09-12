@@ -345,24 +345,57 @@ def test_analysis_is_read_only_with_shared_assets(project: Path, destination: st
     migration = analyse(Layout.make(project), Path(destination))
     assert snapshot(project) == before
     assert not migration.blockers
-    for name in ("great-docs.yml", "user_guide", "essays", "custom", "index.qmd"):
+    for name in ("great-docs.yml", "user_guide", "essays", "custom", "index.qmd", "assets"):
         assert Move(project / name, project / destination / name) in migration.moves
-    assert not any(
-        move.source.name in {"assets", "README.md", "sample"} for move in migration.moves
-    )
+    assert not any(move.source.name in {"README.md", "sample"} for move in migration.moves)
     fingerprints = dict(migration.fingerprints)
     assert project / "assets/chart.png" in fingerprints
     assert project / "refs.bib" in fingerprints
     assert project / "user_guide" in fingerprints
     edits = {edit.path: edit for edit in migration.edits}
-    prefix = "../" * (len(Path(destination).parts) + 1)
-    assert (
-        edits[project / "user_guide/page.qmd"].after
-        == f"![Chart]({prefix}assets/chart.png)\n".encode()
-    )
+    assert project / "user_guide/page.qmd" not in edits
     assert edits[project / ".gitignore"].after == (
         f"great-docs/\n_freeze/\n/{destination}/_quarto/\n/{destination}/_site/\n".encode()
     )
+
+
+def test_asset_directory_referenced_only_by_moving_content_folds_in(project: Path) -> None:
+    put(project, "assets/chart.png", b"\x00\xff")
+    put(project, "user_guide/page.qmd", "![Chart](../assets/chart.png)\n")
+    result = analyse(Layout.make(project), Path("docs"))
+    assert not result.blockers
+    assert Move(project / "assets", project / "docs/assets") in result.moves
+    assert not any(edit.path == project / "user_guide/page.qmd" for edit in result.edits)
+
+
+def test_asset_directory_referenced_externally_stays_protected(project: Path) -> None:
+    put(project, "assets/chart.png", b"\x00\xff")
+    put(project, "user_guide/page.qmd", "![Chart](../assets/chart.png)\n")
+    put(project, "README.md", "![Chart](assets/chart.png)\n")
+    result = analyse(Layout.make(project), Path("docs"))
+    assert not any(move.source == project / "assets" for move in result.moves)
+    edits = {edit.path: edit for edit in result.edits}
+    assert edits[project / "user_guide/page.qmd"].after == b"![Chart](../../assets/chart.png)\n"
+
+
+def test_directory_referenced_only_from_config_path_folds_in(project: Path) -> None:
+    put(project, "great-docs.yml", "module: sample\nskill: {skills: [{file: skills/demo/SKILL.md}]}\n")
+    put(project, "skills/demo/SKILL.md", "# Demo skill\n")
+    result = analyse(Layout.make(project), Path("docs"))
+    assert not result.blockers
+    assert Move(project / "skills", project / "docs/skills") in result.moves
+
+
+def test_mixed_fold_in_and_protected_directories(project: Path) -> None:
+    put(project, "assets/chart.png", b"\x00\xff")
+    put(project, "user_guide/page.qmd", "![Chart](../assets/chart.png)\n")
+    put(project, "README.md", "![Chart](assets/chart.png)\n")
+    put(project, "great-docs.yml", "skill: {skills: [{file: skills/demo/SKILL.md}]}\n")
+    put(project, "skills/demo/SKILL.md", "# Demo skill\n")
+    result = analyse(Layout.make(project), Path("docs"))
+    moved = {move.source for move in result.moves}
+    assert project / "skills" in moved
+    assert project / "assets" not in moved
 
 
 @pytest.mark.parametrize("target", ["great-docs.yml", "user_guide", "_freeze"])
@@ -700,12 +733,16 @@ def test_implicit_logos_become_explicit_without_losing_settings(project: Path) -
     put(project, "logo-hero.png", b"hero")
     result = analyse(Layout.make(project), Path("docs"))
     assert not result.blockers
+    # Nothing besides the implicit logo fields references `assets`, so it folds
+    # into the destination alongside `great-docs.yml`; the two move together and
+    # the relative path between them is unchanged.
+    assert Move(project / "assets", project / "docs/assets") in result.moves
     edit = next(edit for edit in result.edits if edit.path == project / "great-docs.yml")
     config = read_yaml(io.StringIO(edit.after.decode()))
     assert config["logo"] == {
         "alt": "Sample",
-        "light": "../assets/logo.svg",
-        "dark": "../assets/logo-dark.svg",
+        "light": "assets/logo.svg",
+        "dark": "assets/logo-dark.svg",
     }
     assert config["hero"]["logo"] == {"light": "../logo-hero.png", "dark": "../logo-hero.png"}
     assert config["hero"]["tagline"] == "Simple"
@@ -822,6 +859,11 @@ def test_migrated_shared_asset_is_staged_under_the_build(project: Path) -> None:
         "user_guide/01-start.qmd",
         "---\ntitle: Start\n---\n![Chart](../assets/chart.png)\n",
     )
+    # A second, non-moving reference keeps `assets` outside the move-set (see
+    # `test_asset_directory_referenced_externally_stays_protected`), so this
+    # fixture still exercises the build's `_shared` staging for a genuinely
+    # shared asset rather than one that now moves alongside the user guide.
+    put(project, "README.md", "![Chart](assets/chart.png)\n")
     migration = analyse(Layout.make(project), Path("docs"))
     assert not migration.blockers
     for edit in migration.edits:
