@@ -1,6 +1,7 @@
 import io
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -442,6 +443,56 @@ def test_fold_in_candidate_overlapping_the_destination_stays_in_place(project: P
     result = analyse(Layout.make(project), Path("docs"))
     assert not result.blockers
     assert not any(move.source == project / "docs" for move in result.moves)
+
+
+def test_directory_holding_a_render_script_does_not_fold_in(project: Path) -> None:
+    put(project, "great-docs.yml", "module: sample\npre_render: tools/build.py\n")
+    put(project, "tools/build.py", "print('build')\n")
+    put(project, "tools/chart.png", b"\x00\xff")
+    put(project, "user_guide/page.qmd", "![Chart](../tools/chart.png)\n")
+    result = analyse(Layout.make(project), Path("docs"))
+    assert not result.blockers
+    # `pre_render` names an executable path that only the shell running it resolves,
+    # so folding its directory in would relocate the script out from under the caller.
+    assert not any(move.source == project / "tools" for move in result.moves)
+
+
+def test_fold_in_reports_unreadable_git_ignore_rules_as_a_blocker(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    put(project, "assets/chart.png", b"\x00\xff")
+    put(project, "user_guide/page.qmd", "![Chart](../assets/chart.png)\n")
+
+    def unreadable(root: Path) -> frozenset[Path] | None:
+        raise MigrationError("local Git check exited 128")
+
+    monkeypatch.setattr(
+        sys.modules["great_docs._layout_migration.analyse"], "_ignored_paths", unreadable
+    )
+    result = analyse(Layout.make(project), Path("docs"))
+    assert any("git ignore rules" in message for message in result.blockers)
+
+
+def test_symlink_inside_a_fold_in_candidate_blocks_instead_of_crashing(project: Path) -> None:
+    put(project, "assets/chart.png", b"\x00\xff")
+    (project / "assets/link.png").symlink_to(project / "outside.png")
+    put(project, "user_guide/page.qmd", "![Chart](../assets/chart.png)\n")
+    result = analyse(Layout.make(project), Path("docs"))
+    assert any("Cannot inspect" in message and "assets" in message for message in result.blockers)
+
+
+def test_folded_in_notebook_gets_the_same_review_note_as_a_selected_directory(
+    project: Path,
+) -> None:
+    put(project, "extras/demo.ipynb", '{"cells": []}\n')
+    put(project, "user_guide/page.qmd", "[Demo](../extras/demo.ipynb)\n")
+    result = analyse(Layout.make(project), Path("docs"))
+    assert not result.blockers
+    assert Move(project / "extras", project / "docs/extras") in result.moves
+    assert any(
+        "Review dynamic code" in message and "extras/demo.ipynb" in message
+        for message in result.follow_up
+    )
 
 
 def test_external_reference_survives_as_a_review_note(project: Path) -> None:
