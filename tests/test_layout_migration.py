@@ -366,6 +366,7 @@ def test_asset_directory_referenced_only_by_moving_content_folds_in(project: Pat
     assert not result.blockers
     assert Move(project / "assets", project / "docs/assets") in result.moves
     assert not any(edit.path == project / "user_guide/page.qmd" for edit in result.edits)
+    assert not any("external reference" in message.lower() for message in result.follow_up)
 
 
 def test_asset_directory_referenced_externally_stays_protected(project: Path) -> None:
@@ -376,6 +377,10 @@ def test_asset_directory_referenced_externally_stays_protected(project: Path) ->
     assert not any(move.source == project / "assets" for move in result.moves)
     edits = {edit.path: edit for edit in result.edits}
     assert edits[project / "user_guide/page.qmd"].after == b"![Chart](../../assets/chart.png)\n"
+    assert any(
+        "external reference" in message.lower() and "assets/chart.png" in message
+        for message in result.follow_up
+    )
 
 
 def test_directory_referenced_only_from_config_path_folds_in(project: Path) -> None:
