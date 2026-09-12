@@ -858,6 +858,19 @@ def test_recursive_terminal_recordings_have_file_specific_follow_up(project: Pat
     assert companion in dict(result.fingerprints)
 
 
+def test_gitignored_fixture_tree_is_not_reviewed(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+    put(project, ".gitignore", "test-packages/*/\n")
+    put(project, "test-packages/_rendered/demo.termshow", "recording")
+    put(project, "assets/demo.termshow", "recording")
+    result = analyse(Layout.make(project), Path("docs"))
+    assert not any("test-packages" in message for message in result.follow_up)
+    assert any("assets/demo.termshow" in message for message in result.follow_up)
+
+
 @pytest.mark.parametrize("directory", ["user_guide", "_freeze", "great-docs/_freeze"])
 def test_preview_fingerprint_detects_changed_tree_hierarchy(project: Path, directory: str) -> None:
     if directory.startswith("great-docs/"):
