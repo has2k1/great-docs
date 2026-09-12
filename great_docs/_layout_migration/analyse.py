@@ -818,6 +818,27 @@ def analyse(layout: Layout, destination: Path) -> Migration:
         except (OSError, UnicodeError, ValueError) as error:
             blockers.append(f"Cannot inspect document {path}: {error}")
 
+    for doc in sorted(documents):
+        try:
+            text = doc.read_bytes().decode("utf-8")
+        except (OSError, UnicodeError):
+            continue
+        _, inputs, _, _ = rewrite_document(
+            text,
+            doc,
+            tuple(moves),
+            generated_homepage=generated_homepage,
+            content_directories=content_directories,
+        )
+        relocated_doc = moved_path(doc, tuple(moves))
+        if not relocated_doc.is_relative_to(destination):
+            continue
+        for target in inputs:
+            if moved_path(target, tuple(moves)) == target and (
+                not target.is_relative_to(destination)
+            ):
+                follow_up.append(f"Review: external reference from {doc} to {target}")
+
     assets = root / "assets"
     referenced = set(fingerprints)
     if assets.exists() and assets not in {move.source for move in moves} and retain(assets):

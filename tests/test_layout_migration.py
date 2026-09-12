@@ -439,6 +439,17 @@ def test_fold_in_candidate_overlapping_the_destination_stays_in_place(project: P
     assert not any(move.source == project / "docs" for move in result.moves)
 
 
+def test_external_reference_survives_as_a_review_note(project: Path) -> None:
+    put(project, "CONTRIBUTING.md", "# Contributing\n")
+    put(project, "user_guide/page.qmd", "{{< include ../CONTRIBUTING.md >}}\n")
+    result = analyse(Layout.make(project), Path("docs"))
+    assert not result.blockers
+    assert any(
+        "external reference" in message.lower() and "CONTRIBUTING.md" in message
+        for message in result.follow_up
+    )
+
+
 @pytest.mark.parametrize("target", ["great-docs.yml", "user_guide", "_freeze"])
 def test_destination_collisions_block_without_writes(project: Path, target: str) -> None:
     put(project, "user_guide/page.md", "# Page")
