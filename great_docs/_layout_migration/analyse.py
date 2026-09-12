@@ -51,6 +51,37 @@ _RESERVED = {
 }
 
 
+def _git(root: Path, *args: str, input_bytes: bytes | None = None) -> bytes:
+    result = subprocess.run(
+        ["git", "--no-optional-locks", "-C", str(root), *args],
+        input=input_bytes,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode not in {0, 1}:
+        raise MigrationError(
+            f"Cannot run git {args[0]}: local Git check exited {result.returncode}"
+        )
+    return result.stdout
+
+
+def _ignored_paths(root: Path) -> frozenset[Path] | None:
+    """
+    Return every path Git ignores under `root`, or `None` outside a worktree
+
+    `None` means "no ignore information available" rather than "nothing is
+    ignored" — callers must treat it as "skip this check", matching how
+    `_check_freeze_ignore_policy` already falls back outside a Git worktree.
+    """
+    if not any((parent / ".git").exists() for parent in (root, *root.parents)):
+        return None
+    output = _git(
+        root, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"
+    )
+    return frozenset(root / os.fsdecode(path).rstrip("/") for path in output.split(b"\0") if path)
+
+
 def _check_freeze_ignore_policy(
     root: Path,
     destination: Path,
@@ -95,37 +126,23 @@ def _check_freeze_ignore_policy(
             )
         return
 
-    def git(*args: str, input_bytes: bytes | None = None) -> bytes:
-        result = subprocess.run(
-            ["git", "--no-optional-locks", "-C", str(root), *args],
-            input=input_bytes,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-        if result.returncode not in {0, 1}:
-            raise MigrationError(
-                f"Cannot verify freeze ignore policy: local Git check exited {result.returncode}"
-            )
-        return result.stdout
-
-    repository = Path(os.fsdecode(git("rev-parse", "--show-toplevel")).strip())
+    repository = Path(os.fsdecode(_git(root, "rev-parse", "--show-toplevel")).strip())
     for path in (root, *root.parents):
         if path.is_relative_to(repository):
             retain_policy(path / ".gitignore")
     for name in ("info/exclude", "config", "config.worktree", "HEAD", "index"):
         retain_policy(
-            absolute_path(root / os.fsdecode(git("rev-parse", "--git-path", name)).strip())
+            absolute_path(root / os.fsdecode(_git(root, "rev-parse", "--git-path", name)).strip())
         )
-    shared_index = os.fsdecode(git("rev-parse", "--shared-index-path")).strip()
+    shared_index = os.fsdecode(_git(root, "rev-parse", "--shared-index-path")).strip()
     if shared_index:
         retain_policy(absolute_path(root / shared_index))
     tracked = {
         root / os.fsdecode(path)
-        for path in git("ls-files", "--cached", "-z", "--", "_freeze").split(b"\0")
+        for path in _git(root, "ls-files", "--cached", "-z", "--", "_freeze").split(b"\0")
         if path
     }
-    config = git("config", "--show-origin", "--list").decode("utf-8")
+    config = _git(root, "config", "--show-origin", "--list").decode("utf-8")
     for line in config.splitlines():
         origin, separator, entry = line.partition("\t")
         if not separator or not origin.startswith("file:"):
@@ -151,7 +168,7 @@ def _check_freeze_ignore_policy(
     )
     for path in defaults:
         retain_policy(path)
-    excludes = os.fsdecode(git("config", "--path", "--get", "core.excludesFile")).strip()
+    excludes = os.fsdecode(_git(root, "config", "--path", "--get", "core.excludesFile")).strip()
     if excludes:
         retain_policy(absolute_path(root / Path(excludes).expanduser()))
     queries = [
@@ -160,7 +177,8 @@ def _check_freeze_ignore_policy(
         for path in (before, after)
     ]
     ignored = set(
-        git(
+        _git(
+            root,
             "check-ignore",
             "--no-index",
             "-z",
@@ -341,6 +359,17 @@ def _content_directories(config: dict[str, Any], root: Path) -> tuple[ContentDir
                 )
             )
     return tuple(directories)
+
+
+def _walk_into(path: Path, generated: list[Path], ignored: frozenset[Path] | None) -> bool:
+    """Whether a directory the implicit-input walk finds should be descended into"""
+    return (
+        not path.name.startswith(".")
+        and path.name not in {"_quarto", "_site", "_freeze"}
+        and path not in generated
+        and not path.is_symlink()
+        and (ignored is None or path not in ignored)
+    )
 
 
 def analyse(layout: Layout, destination: Path) -> Migration:
@@ -728,16 +757,10 @@ def analyse(layout: Layout, destination: Path) -> Migration:
     def report_walk_error(error: OSError) -> None:
         blockers.append(f"Cannot inspect implicit documentation inputs: {error}")
 
+    ignored = _ignored_paths(root)
     for directory, children, names in os.walk(root, onerror=report_walk_error, followlinks=False):
         parent = Path(directory)
-        children[:] = [
-            name
-            for name in children
-            if not name.startswith(".")
-            and name not in {"_quarto", "_site", "_freeze"}
-            and parent / name not in generated
-            and not (parent / name).is_symlink()
-        ]
+        children[:] = [name for name in children if _walk_into(parent / name, generated, ignored)]
         for name in names:
             path = parent / name
             if path.suffix == ".termshow":
