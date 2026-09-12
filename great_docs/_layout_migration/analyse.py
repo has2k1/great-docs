@@ -757,7 +757,11 @@ def analyse(layout: Layout, destination: Path) -> Migration:
     def report_walk_error(error: OSError) -> None:
         blockers.append(f"Cannot inspect implicit documentation inputs: {error}")
 
-    ignored = _ignored_paths(root)
+    try:
+        ignored = _ignored_paths(root)
+    except (OSError, MigrationError) as error:
+        blockers.append(f"Cannot inspect git ignore rules: {error}")
+        ignored = None
     for directory, children, names in os.walk(root, onerror=report_walk_error, followlinks=False):
         parent = Path(directory)
         children[:] = [name for name in children if _walk_into(parent / name, generated, ignored)]

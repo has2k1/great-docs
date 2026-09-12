@@ -9,7 +9,7 @@ from yaml12 import read_yaml
 
 from great_docs._layout import Layout
 from great_docs._layout_migration import analyse
-from great_docs._layout_migration.model import Move, fingerprint
+from great_docs._layout_migration.model import MigrationError, Move, fingerprint
 from great_docs._utils import QUARTO_YML_HEADER
 from great_docs.cli import cli
 
@@ -869,6 +869,22 @@ def test_gitignored_fixture_tree_is_not_reviewed(
     result = analyse(Layout.make(project), Path("docs"))
     assert not any("test-packages" in message for message in result.follow_up)
     assert any("assets/demo.termshow" in message for message in result.follow_up)
+
+
+def test_unavailable_git_ignore_check_is_a_blocker_not_a_crash(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import importlib
+
+    analyse_module = importlib.import_module("great_docs._layout_migration.analyse")
+    subprocess.run(["git", "init", "-q"], cwd=project, check=True)
+
+    def unavailable(root: Path, *args: str, input_bytes: bytes | None = None) -> bytes:
+        raise MigrationError("git executable not found")
+
+    monkeypatch.setattr(analyse_module, "_git", unavailable)
+    result = analyse(Layout.make(project), Path("docs"))
+    assert any("git ignore rules" in message.lower() for message in result.blockers)
 
 
 @pytest.mark.parametrize("directory", ["user_guide", "_freeze", "great-docs/_freeze"])
