@@ -365,26 +365,26 @@ def _content_directories(config: dict[str, Any], root: Path) -> tuple[ContentDir
 def _exclusive_to_moving_content(
     candidates: list[Path],
     root: Path,
-    documents: set[Path],
     moves: list[Move],
     content_directories: tuple[ContentDirectory, ...],
     generated: list[Path],
 ) -> set[Path]:
     """Return which candidates are referenced only from content already moving"""
-    non_moving: set[Path] = set()
     ignored = _ignored_paths(root)
+    non_moving: set[Path] = set()
     for directory, children, names in os.walk(root, followlinks=False):
         parent = Path(directory)
         children[:] = [name for name in children if _walk_into(parent / name, generated, ignored)]
-        if any(parent.is_relative_to(candidate) for candidate in candidates):
-            continue
         for name in names:
             path = parent / name
             # A `documents` membership check is not enough here: `documents` also
             # holds README-style files that are *edited in place* rather than moved
             # (see `analyse`'s README loop), so it cannot distinguish moving content
             # from content that merely stays put and gets its links patched. Whether
-            # a move would relocate the file is the only reliable test.
+            # a move would relocate the file is the only reliable test. Every
+            # candidate's own subtree is included here too, so a file inside one
+            # not-yet-decided candidate can still prove another candidate is
+            # externally referenced.
             if (
                 path.suffix.lower() in _DOCUMENT_SUFFIXES
                 and moved_path(path, tuple(moves)) == path
@@ -400,7 +400,10 @@ def _exclusive_to_moving_content(
         _, inputs, _, _ = rewrite_document(text, doc, (), content_directories=content_directories)
         for target in inputs:
             for candidate in candidates:
-                if target.is_relative_to(candidate):
+                # A reference from inside the candidate's own subtree to itself
+                # isn't external: once the candidate folds in, both files move
+                # together as one unit.
+                if target.is_relative_to(candidate) and not doc.is_relative_to(candidate):
                     referenced_externally.add(candidate)
     return {candidate for candidate in candidates if candidate not in referenced_externally}
 
@@ -413,6 +416,7 @@ def _fold_in_static_directories(
     protected: list[Path],
     content_directories: tuple[ContentDirectory, ...],
     config_referenced: set[Path],
+    pinned_absolute: set[Path],
     retain: Callable[[Path], bool],
     generated: list[Path],
 ) -> list[str]:
@@ -421,10 +425,9 @@ def _fold_in_static_directories(
 
     Repeat until no further directory qualifies, since folding one directory
     in can pull its own files into `documents` and reveal new references. Fingerprint
-    every folded-in directory the same way the original move-set already is (`analyse`'s
-    per-move loop at `analyse.py:552-574` only runs over the *original* move-set, before
-    this pass adds to it). Return the follow-up notes for directories deliberately left
-    in place.
+    every folded-in directory the same way the original move-set loop already is, since
+    that loop only runs over the *original* move-set, before this pass adds to it. Return
+    the follow-up notes for directories deliberately left in place.
     """
     follow_up: list[str] = []
     folded: set[Path] = {move.source for move in moves}
@@ -440,7 +443,7 @@ def _fold_in_static_directories(
             )
             referenced.update(inputs)
         candidates: dict[Path, Path] = {}
-        for target in referenced:
+        for target in sorted(referenced):
             if not target.is_relative_to(root) or moved_path(target, tuple(moves)) != target:
                 continue
             top = root / target.relative_to(root).parts[0]
@@ -450,11 +453,13 @@ def _fold_in_static_directories(
             candidate
             for candidate in candidates
             if not any(_overlaps(candidate, path) for path in protected)
+            and not any(_overlaps(candidate, path) for path in pinned_absolute)
+            and not _overlaps(candidate, destination)
         ]
         if not to_fold:
             break
         exclusive = _exclusive_to_moving_content(
-            to_fold, root, documents, moves, content_directories, generated
+            to_fold, root, moves, content_directories, generated
         )
         for candidate in to_fold:
             if candidate not in exclusive:
@@ -688,16 +693,19 @@ def analyse(layout: Layout, destination: Path) -> Migration:
         materialised, amended = text, config
     documents: set[Path] = set()
     config_referenced: set[Path] = set()
+    pinned_absolute: set[Path] = set()
     for option, value in config_paths(amended):
         try:
             source = local_path(value, root)
             if source is None:
                 continue
-            if not Path(value).is_absolute():
+            if Path(value).is_absolute():
                 # An absolute config value is a deliberate opt-out of relocation
                 # (`_dedicated_directories` already excludes it from `selected`/`moves`
                 # on the same basis); folding it in would silently move something the
-                # author pinned in place.
+                # author pinned in place, however it's discovered as a candidate.
+                pinned_absolute.add(source)
+            else:
                 config_referenced.add(source)
             check_symlinks(root / value)
             readable = retain(source)
@@ -768,6 +776,7 @@ def analyse(layout: Layout, destination: Path) -> Migration:
             protected,
             content_directories,
             config_referenced,
+            pinned_absolute,
             retain,
             generated,
         )

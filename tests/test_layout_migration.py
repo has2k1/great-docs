@@ -379,7 +379,11 @@ def test_asset_directory_referenced_externally_stays_protected(project: Path) ->
 
 
 def test_directory_referenced_only_from_config_path_folds_in(project: Path) -> None:
-    put(project, "great-docs.yml", "module: sample\nskill: {skills: [{file: skills/demo/SKILL.md}]}\n")
+    put(
+        project,
+        "great-docs.yml",
+        "module: sample\nskill: {skills: [{file: skills/demo/SKILL.md}]}\n",
+    )
     put(project, "skills/demo/SKILL.md", "# Demo skill\n")
     result = analyse(Layout.make(project), Path("docs"))
     assert not result.blockers
@@ -396,6 +400,43 @@ def test_mixed_fold_in_and_protected_directories(project: Path) -> None:
     moved = {move.source for move in result.moves}
     assert project / "skills" in moved
     assert project / "assets" not in moved
+
+
+def test_absolutely_pinned_directory_does_not_fold_in_via_document_link(project: Path) -> None:
+    directory = project / "essays"
+    put(project, "essays/one.md", "# One\n")
+    put(project, "great-docs.yml", f"module: sample\nsections: [{{dir: '{directory}'}}]\n")
+    put(project, "user_guide/page.qmd", "[Essay](../essays/one.md)\n")
+    result = analyse(Layout.make(project), Path("docs"))
+    assert not result.blockers
+    # `essays` is pinned absolutely in the config, so `_dedicated_directories`
+    # never selects it into `moves` either; a moving document also linking to
+    # it must not fold it in behind the config's back.
+    assert not any(move.source == directory for move in result.moves)
+
+
+def test_fold_in_checks_a_candidates_own_referrer_for_external_references(
+    project: Path,
+) -> None:
+    put(project, "user_guide/page.qmd", "[Notes](../notes/a.md)\n![Chart](../assets/chart.png)\n")
+    put(project, "assets/chart.png", b"\x00\xff")
+    put(project, "notes/a.md", "[Chart](../assets/chart.png)\n")
+    put(project, "README.md", "[Notes](notes/a.md)\n")
+    result = analyse(Layout.make(project), Path("docs"))
+    moved = {move.source for move in result.moves}
+    # `notes` stays protected because README references it directly. `notes/a.md`
+    # itself references `assets`, so `assets` must stay protected too, even
+    # though `notes`'s own subtree was excluded from the batch's move-set walk.
+    assert project / "notes" not in moved
+    assert project / "assets" not in moved
+
+
+def test_fold_in_candidate_overlapping_the_destination_stays_in_place(project: Path) -> None:
+    put(project, "user_guide/page.qmd", "[Existing](../docs/notes.md)\n")
+    put(project, "docs/notes.md", "# Notes\n")
+    result = analyse(Layout.make(project), Path("docs"))
+    assert not result.blockers
+    assert not any(move.source == project / "docs" for move in result.moves)
 
 
 @pytest.mark.parametrize("target", ["great-docs.yml", "user_guide", "_freeze"])
