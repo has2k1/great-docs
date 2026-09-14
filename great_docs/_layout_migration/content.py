@@ -21,7 +21,7 @@ from yaml12 import read_yaml
 from great_docs._content_naming import strip_numeric_prefix
 from great_docs._source_refs import fenced_code_spans, inline_code_spans, source_reference_spans
 
-from .model import MigrationError, Move, absolute_path, check_symlinks, moved_path
+from .model import MigrationError, Move, Note, absolute_path, check_symlinks, moved_path
 
 ConfigPath = tuple[str | int, ...]
 
@@ -383,14 +383,23 @@ def rewrite_document(
     Preserve surrounding Markdown, HTML, examples, URL queries, and fragments.
     """
     inputs: set[Path] = set()
-    follow_up: list[str] = []
-    blockers: list[str] = []
+    follow_up: list[Note] = []
+    blockers: list[Note] = []
     relocated = moved_path(source, moves)
     spans = source_reference_spans(text, html=source.suffix.lower() in {".html", ".htm"})
     for start, end in reversed(spans):
         value = text[start:end]
         if any(token in value for token in ("{{", "${", "<%")):
-            follow_up.append(f"Review dynamic reference in {source}: {value}")
+            line, snippet = _locate(text, start)
+            follow_up.append(
+                Note(
+                    f"Review dynamic reference in {source}: {value}",
+                    category="Dynamic content",
+                    path=source,
+                    line=line,
+                    snippet=snippet,
+                )
+            )
             continue
         url = urlsplit(value)
         if url.scheme or url.netloc or not url.path or value.startswith("/"):
@@ -447,7 +456,16 @@ def rewrite_document(
                 else:
                     raise MigrationError(f"Broken reference in {source}: {value}")
         except (OSError, MigrationError) as error:
-            blockers.append(str(error))
+            line, snippet = _locate(text, start)
+            blockers.append(
+                Note(
+                    str(error),
+                    category="Broken references",
+                    path=source,
+                    line=line,
+                    snippet=snippet,
+                )
+            )
             continue
         inputs.add(input_target)
         if republished is not None:
@@ -464,10 +482,29 @@ def rewrite_document(
         replacement = urlunsplit(("", "", quote(path, safe=safe), url.query, url.fragment))
         text = text[:start] + replacement + text[end:]
     if relocated != source:
-        if re.search(r"(?:`{3,}|~{3,})\s*\{(?:python|r|julia|ojs|bash|sh)\b", text):
-            follow_up.append(f"Review dynamic code and working-directory assumptions in {source}")
+        code_match = re.search(r"(?:`{3,}|~{3,})\s*\{(?:python|r|julia|ojs|bash|sh)\b", text)
+        if code_match:
+            line, snippet = _locate(text, code_match.start())
+            follow_up.append(
+                Note(
+                    f"Review dynamic code and working-directory assumptions in {source}",
+                    category="Dynamic content",
+                    path=source,
+                    line=line,
+                    snippet=snippet,
+                )
+            )
         if "{{<" in text:
-            follow_up.append(f"Review Quarto shortcode inputs in {source}")
+            line, snippet = _locate(text, text.index("{{<"))
+            follow_up.append(
+                Note(
+                    f"Review Quarto shortcode inputs in {source}",
+                    category="Shortcode inputs",
+                    path=source,
+                    line=line,
+                    snippet=snippet,
+                )
+            )
             protected = fenced_code_spans(text) + inline_code_spans(text)
             matches = [
                 match
@@ -482,23 +519,62 @@ def rewrite_document(
                     continue
                 inputs.add(target)
                 if not target.exists():
-                    blockers.append(f"Cannot preserve include reference in {source}: {reference}")
+                    line, snippet = _locate(text, match.start(1))
+                    blockers.append(
+                        Note(
+                            f"Cannot preserve include reference in {source}: {reference}",
+                            category="Include references",
+                            path=source,
+                            line=line,
+                            snippet=snippet,
+                        )
+                    )
                     continue
                 moved = moved_path(target, moves)
                 if absolute_path(relocated.parent / reference) == moved:
                     continue
                 if raw.strip() != reference or " " in reference:
-                    blockers.append(f"Cannot preserve include reference in {source}: {reference}")
+                    line, snippet = _locate(text, match.start(1))
+                    blockers.append(
+                        Note(
+                            f"Cannot preserve include reference in {source}: {reference}",
+                            category="Include references",
+                            path=source,
+                            line=line,
+                            snippet=snippet,
+                        )
+                    )
                     continue
                 new_reference = Path(os.path.relpath(moved, relocated.parent)).as_posix()
                 start, end = match.span(1)
                 text = text[:start] + new_reference + text[end:]
-        if re.search(r"\b(?:srcset|data-src|style)\s*=", text):
-            follow_up.append(f"Review unsupported HTML file references in {source}")
+        html_match = re.search(r"\b(?:srcset|data-src|style)\s*=", text)
+        if html_match:
+            line, snippet = _locate(text, html_match.start())
+            follow_up.append(
+                Note(
+                    f"Review unsupported HTML file references in {source}",
+                    category="Unsupported HTML references",
+                    path=source,
+                    line=line,
+                    snippet=snippet,
+                )
+            )
         frontmatter = re.match(r"\A---\s*\n(.*?)\n---\s*(?:\n|$)", text, re.DOTALL)
-        if frontmatter and re.search(
-            r"(?m)^\s*(?:image|bibliography|csl|resources|include-in-header|include-before-body|include-after-body)\s*:",
-            frontmatter[1],
-        ):
-            blockers.append(f"Review and explicitly rebase frontmatter file references in {source}")
+        if frontmatter:
+            field_match = re.search(
+                r"(?m)^\s*(?:image|bibliography|csl|resources|include-in-header|include-before-body|include-after-body)\s*:",
+                frontmatter[1],
+            )
+            if field_match:
+                line, snippet = _locate(text, frontmatter.start(1) + field_match.start())
+                blockers.append(
+                    Note(
+                        f"Review and explicitly rebase frontmatter file references in {source}",
+                        category="Frontmatter references",
+                        path=source,
+                        line=line,
+                        snippet=snippet,
+                    )
+                )
     return text, tuple(sorted(inputs)), tuple(follow_up), tuple(blockers)
