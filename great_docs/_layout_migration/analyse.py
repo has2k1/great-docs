@@ -30,6 +30,7 @@ from .model import (
     Migration,
     MigrationError,
     Move,
+    Note,
     absolute_path,
     check_symlinks,
     fingerprint,
@@ -428,20 +429,34 @@ def _categorize_move_contents(
                 continue
             if path.name == "__init__.py" or path.name in _MANIFESTS:
                 blockers.append(
-                    f"Documentation directory contains package sources or metadata: {path}"
+                    Note(
+                        f"Documentation directory contains package sources or metadata: {path}",
+                        category="Directory conflicts",
+                        path=path,
+                    )
                 )
             if path.suffix.lower() in _DOCUMENT_SUFFIXES:
                 documents.add(path)
             elif path.suffix.lower() in {".ipynb", ".py", ".r", ".jl"}:
                 follow_up.append(
-                    f"Review dynamic code, notebook references, and working-directory assumptions in {path}"
+                    Note(
+                        f"Review dynamic code, notebook references, and working-directory assumptions in {path}",
+                        category="Dynamic content",
+                        path=path,
+                    )
                 )
             elif path.suffix.lower() in {".rst", ".termshow"}:
                 follow_up.append(
-                    f"Review unsupported document or companion-file references in {path}"
+                    Note(
+                        f"Review unsupported document or companion-file references in {path}",
+                        category="Unsupported references",
+                        path=path,
+                    )
                 )
     except (OSError, MigrationError) as error:
-        blockers.append(f"Cannot inspect {move.source}: {error}")
+        blockers.append(
+            Note(f"Cannot inspect {move.source}: {error}", category="I/O errors", path=move.source)
+        )
 
 
 def _fold_in_static_directories(
@@ -564,7 +579,9 @@ def analyse(layout: Layout, destination: Path) -> Migration:
             fingerprints[path] = fingerprint(path)
             return True
         except (OSError, MigrationError) as error:
-            blockers.append(f"Cannot inspect {path}: {error}")
+            blockers.append(
+                Note(f"Cannot inspect {path}: {error}", category="I/O errors", path=path)
+            )
             return False
 
     def retain_policy(path: Path) -> bool:
@@ -585,30 +602,56 @@ def analyse(layout: Layout, destination: Path) -> Migration:
                 target = absolute_path(link.parent / os.readlink(link))
                 path = target / path.relative_to(link)
         except (OSError, MigrationError) as error:
-            blockers.append(f"Cannot inspect ignore policy {path}: {error}")
+            blockers.append(
+                Note(
+                    f"Cannot inspect ignore policy {path}: {error}",
+                    category="I/O errors",
+                    path=path,
+                )
+            )
             return False
 
     if layout.source_dir != root:
         if destination == layout.source_dir:
             follow_up.append(
-                f"Documentation already uses {layout.source_dir}; no migration is needed"
+                Note(
+                    f"Documentation already uses {layout.source_dir}; no migration is needed",
+                    category="Status",
+                    path=layout.source_dir,
+                )
             )
         else:
             blockers.append(
-                f"Relocating an already migrated project is unsupported: {layout.source_dir}"
+                Note(
+                    f"Relocating an already migrated project is unsupported: {layout.source_dir}",
+                    category="Unsupported migration",
+                    path=layout.source_dir,
+                )
             )
         return result()
     if destination == root or not destination.is_relative_to(root):
-        blockers.append(f"The destination must be a descendant of the package root: {destination}")
+        blockers.append(
+            Note(
+                f"The destination must be a descendant of the package root: {destination}",
+                category="Destination conflicts",
+                path=destination,
+            )
+        )
         return result()
     try:
         check_symlinks(supplied_destination)
         check_symlinks(destination)
         for component in (destination, *destination.parents):
             if component.exists() and not component.is_dir():
-                blockers.append(f"Destination component is not a directory: {component}")
+                blockers.append(
+                    Note(
+                        f"Destination component is not a directory: {component}",
+                        category="Destination conflicts",
+                        path=component,
+                    )
+                )
     except MigrationError as error:
-        blockers.append(str(error))
+        blockers.append(Note(str(error), category="Destination conflicts", path=destination))
     if not retain(config_path):
         return result()
     try:
@@ -617,7 +660,13 @@ def analyse(layout: Layout, destination: Path) -> Migration:
         config = read_config(text)
         rewrite_config(text, (), root, root)
     except (OSError, UnicodeError, MigrationError) as error:
-        blockers.append(f"Cannot inspect configuration {config_path}: {error}")
+        blockers.append(
+            Note(
+                f"Cannot inspect configuration {config_path}: {error}",
+                category="I/O errors",
+                path=config_path,
+            )
+        )
         return result()
 
     for name in _MANIFESTS:
@@ -625,7 +674,7 @@ def analyse(layout: Layout, destination: Path) -> Migration:
     try:
         package, package_sources = _package_metadata(root)
     except (OSError, UnicodeError, ValueError, configparser.Error) as error:
-        blockers.append(f"Cannot inspect package metadata: {error}")
+        blockers.append(Note(f"Cannot inspect package metadata: {error}", category="I/O errors"))
         package, package_sources = "", [root / "src"]
     module = config.get("module")
     if isinstance(module, str):
@@ -635,19 +684,23 @@ def analyse(layout: Layout, destination: Path) -> Migration:
         if is_great_docs_build_dir(layout.build_dir):
             generated.append(layout.build_dir)
     except OSError as error:
-        blockers.append(f"Cannot inspect generated projects: {error}")
+        blockers.append(Note(f"Cannot inspect generated projects: {error}", category="I/O errors"))
         generated = []
     protected = [*package_sources, *(root / name for name in _RESERVED), *generated]
     for path in protected:
         if _overlaps(destination, path):
             blockers.append(
-                f"Destination overlaps package sources, shared assets, or generated output: {path}"
+                Note(
+                    f"Destination overlaps package sources, shared assets, or generated output: {path}",
+                    category="Destination conflicts",
+                    path=destination,
+                )
             )
 
     try:
         selected = _dedicated_directories(config, root)
     except (OSError, MigrationError) as error:
-        blockers.append(str(error))
+        blockers.append(Note(str(error), category="I/O errors"))
         selected = []
     content_directories = _content_directories(config, root)
     for name in ("index.qmd", "index.md"):
@@ -657,17 +710,39 @@ def analyse(layout: Layout, destination: Path) -> Migration:
     selected.append(config_path)
     for index, source in enumerate(selected):
         if source == root or not source.is_relative_to(root):
-            blockers.append(f"Documentation source must be a package descendant: {source}")
+            blockers.append(
+                Note(
+                    f"Documentation source must be a package descendant: {source}",
+                    category="Source conflicts",
+                    path=source,
+                )
+            )
             continue
         if _overlaps(source, destination):
-            blockers.append(f"Documentation source overlaps the destination: {source}")
+            blockers.append(
+                Note(
+                    f"Documentation source overlaps the destination: {source}",
+                    category="Source conflicts",
+                    path=source,
+                )
+            )
         for other in selected[:index]:
             if _overlaps(source, other):
-                blockers.append(f"Selected documentation sources overlap: {other} and {source}")
+                blockers.append(
+                    Note(
+                        f"Selected documentation sources overlap: {other} and {source}",
+                        category="Source conflicts",
+                        path=source,
+                    )
+                )
         for path in protected:
             if _overlaps(source, path):
                 blockers.append(
-                    f"Documentation source overlaps package sources, shared assets, or generated output: {source} and {path}"
+                    Note(
+                        f"Documentation source overlaps package sources, shared assets, or generated output: {source} and {path}",
+                        category="Source conflicts",
+                        path=source,
+                    )
                 )
         target = destination / source.relative_to(root)
         if source == config_path:
@@ -675,7 +750,13 @@ def analyse(layout: Layout, destination: Path) -> Migration:
         if source.exists() or source.is_symlink():
             moves.append(Move(source, target))
         else:
-            blockers.append(f"Documentation source does not exist: {source}")
+            blockers.append(
+                Note(
+                    f"Documentation source does not exist: {source}",
+                    category="Source conflicts",
+                    path=source,
+                )
+            )
 
     for name in (
         "user_guide",
@@ -691,7 +772,13 @@ def analyse(layout: Layout, destination: Path) -> Migration:
             retain(root / name)
         target = destination / name
         if target.exists() and not any(move.destination == target for move in moves):
-            blockers.append(f"Existing destination input would change source discovery: {target}")
+            blockers.append(
+                Note(
+                    f"Existing destination input would change source discovery: {target}",
+                    category="Destination conflicts",
+                    path=target,
+                )
+            )
 
     implicit: dict[ConfigPath, Any] = {}
     for path, hero in ((("logo",), False), (("hero", "logo"), True)):

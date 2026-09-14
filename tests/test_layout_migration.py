@@ -1129,3 +1129,65 @@ def test_llms_txt_reference_does_not_block_analysis(project: Path, name: str) ->
     put(project, "skills/sample/SKILL.md", f"[{name}]({name})\n")
     result = analyse(Layout.make(project), Path("docs"))
     assert not result.blockers
+
+
+def test_move_contents_flag_package_metadata_and_dynamic_files(project: Path) -> None:
+    put(project, "great-docs.yml", "sections: [{dir: essays}]\n")
+    put(project, "essays/__init__.py", "")
+    put(project, "essays/analysis.ipynb", "{}")
+    put(project, "essays/notes.rst", "Notes\n")
+    put(project, "essays/one.md", "# One\n")
+    result = analyse(Layout.make(project), Path("docs"))
+    directory = next(n for n in result.blockers if "package sources or metadata" in n.lower())
+    assert directory.category == "Directory conflicts"
+    dynamic = next(n for n in result.follow_up if "notebook references" in n.lower())
+    assert dynamic.category == "Dynamic content"
+    unsupported = next(n for n in result.follow_up if "companion-file references" in n.lower())
+    assert unsupported.category == "Unsupported references"
+
+
+def test_inspection_errors_are_categorized(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    put(project, "great-docs.yml", "bibliography: refs.bib\n")
+    put(project, "refs.bib", "@book{ref}\n")
+    read_bytes = Path.read_bytes
+
+    def unreadable(path: Path) -> bytes:
+        if path.name == "refs.bib":
+            raise PermissionError("unreadable")
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", unreadable)
+    result = analyse(Layout.make(project), Path("docs"))
+    error = next(n for n in result.blockers if "cannot inspect" in n.lower() and "refs.bib" in n)
+    assert error.category == "I/O errors"
+
+
+def test_repeat_migration_reports_a_status_note(project: Path) -> None:
+    from great_docs._layout_migration import apply
+
+    apply(analyse(Layout.make(project), Path("docs")))
+    result = analyse(Layout.make(project), Path("docs"))
+    note = next(n for n in result.follow_up if "no migration is needed" in n.lower())
+    assert note.category == "Status"
+
+
+def test_relocating_migrated_project_is_blocked_with_category(project: Path) -> None:
+    from great_docs._layout_migration import apply
+
+    apply(analyse(Layout.make(project), Path("docs")))
+    result = analyse(Layout.make(project), Path("website"))
+    note = next(n for n in result.blockers if "unsupported" in n.lower())
+    assert note.category == "Unsupported migration"
+
+
+def test_destination_must_be_a_descendant_is_categorized(project: Path) -> None:
+    result = analyse(Layout.make(project), Path("."))
+    note = next(n for n in result.blockers if "must be a descendant" in n.lower())
+    assert note.category == "Destination conflicts"
+
+
+def test_missing_documentation_source_is_categorized(project: Path) -> None:
+    put(project, "great-docs.yml", "sections: [{dir: essays}]\n")
+    result = analyse(Layout.make(project), Path("docs"))
+    note = next(n for n in result.blockers if "does not exist" in n.lower() and "essays" in n)
+    assert note.category == "Source conflicts"
