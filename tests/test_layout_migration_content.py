@@ -4,7 +4,12 @@ from pathlib import Path
 import pytest
 from yaml12 import read_yaml
 
-from great_docs._layout_migration.content import ContentDirectory, rewrite_config, rewrite_document
+from great_docs._layout_migration.content import (
+    ContentDirectory,
+    _locate,
+    rewrite_config,
+    rewrite_document,
+)
 from great_docs._layout_migration.model import MigrationError, Move
 
 
@@ -336,3 +341,22 @@ def test_numeric_prefix_reference_resolves_across_nested_directories(tmp_path: P
     assert not blockers
     assert guide / "02-advanced/03-tips.qmd" in inputs
     assert result == "[Tips](advanced/tips.qmd)"
+
+
+def test_locate_finds_the_first_line() -> None:
+    assert _locate("first\nsecond\n", 2) == (1, "first")
+
+
+def test_locate_finds_a_middle_line() -> None:
+    text = "first\nsecond\nthird\n"
+    assert _locate(text, text.index("second") + 3) == (2, "second")
+
+
+def test_locate_finds_the_last_line_without_a_trailing_newline() -> None:
+    text = "first\nsecond"
+    assert _locate(text, text.index("second")) == (2, "second")
+
+
+def test_locate_handles_crlf_line_endings() -> None:
+    text = "first\r\nsecond\r\n"
+    assert _locate(text, text.index("second")) == (2, "second\r")

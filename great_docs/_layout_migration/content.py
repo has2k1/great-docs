@@ -359,6 +359,14 @@ def set_config_values(text: str, updates: dict[ConfigPath, Any]) -> str:
     return text
 
 
+def _locate(text: str, offset: int) -> tuple[int, str]:
+    """Find the line number and text containing an offset into a document"""
+    line = text.count("\n", 0, offset) + 1
+    start = text.rfind("\n", 0, offset) + 1
+    end = text.find("\n", offset)
+    return line, text[start : end if end != -1 else len(text)]
+
+
 def rewrite_document(
     text: str,
     source: Path,
