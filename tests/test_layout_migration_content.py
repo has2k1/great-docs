@@ -360,3 +360,73 @@ def test_locate_finds_the_last_line_without_a_trailing_newline() -> None:
 def test_locate_handles_crlf_line_endings() -> None:
     text = "first\r\nsecond\r\n"
     assert _locate(text, text.index("second")) == (2, "second\r")
+
+
+def test_dynamic_reference_note_has_a_category_and_excerpt(tmp_path: Path) -> None:
+    page = tmp_path / "index.qmd"
+    text = "before\n![Chart](${base}/chart.png)\n"
+    _, _, follow_up, _ = rewrite_document(text, page, (Move(page, tmp_path / "docs/index.qmd"),))
+    note = next(
+        n for n in follow_up if n.category == "Dynamic content" and "reference" in n.lower()
+    )
+    assert note.path == page
+    assert note.line == 2
+    assert note.snippet == "![Chart](${base}/chart.png)"
+
+
+def test_unsupported_html_reference_note_has_a_category_and_excerpt(tmp_path: Path) -> None:
+    page = tmp_path / "index.qmd"
+    text = 'before\n<img src="a.png" srcset="a.png 1x, b.png 2x">\n'
+    _, _, follow_up, _ = rewrite_document(text, page, (Move(page, tmp_path / "docs/index.qmd"),))
+    note = next(n for n in follow_up if n.category == "Unsupported HTML references")
+    assert note.path == page
+    assert note.line == 2
+    assert "srcset" in note.snippet
+
+
+def test_dynamic_code_note_has_a_category_and_excerpt(tmp_path: Path) -> None:
+    page = tmp_path / "index.qmd"
+    text = 'text\n```{python}\nopen("x")\n```\n'
+    _, _, follow_up, _ = rewrite_document(text, page, (Move(page, tmp_path / "docs/index.qmd"),))
+    note = next(n for n in follow_up if n.category == "Dynamic content" and "code" in n.lower())
+    assert note.line == 2
+    assert note.snippet == "```{python}"
+
+
+def test_shortcode_note_has_a_category_and_first_occurrence_excerpt(tmp_path: Path) -> None:
+    page = tmp_path / "index.qmd"
+    text = "intro\n{{< include extra.qmd >}}\n"
+    _, _, follow_up, _ = rewrite_document(text, page, (Move(page, tmp_path / "docs/index.qmd"),))
+    note = next(n for n in follow_up if n.category == "Shortcode inputs")
+    assert note.line == 2
+    assert note.snippet == "{{< include extra.qmd >}}"
+
+
+def test_include_reference_note_has_a_category_and_excerpt(tmp_path: Path) -> None:
+    text = "notes\n{{< include missing.qmd >}}\n"
+    _, _, _, blockers = rewrite_document(
+        text, tmp_path / "index.qmd", (Move(tmp_path / "index.qmd", tmp_path / "docs/index.qmd"),)
+    )
+    note = next(n for n in blockers if n.category == "Include references")
+    assert note.line == 2
+    assert note.snippet == "{{< include missing.qmd >}}"
+
+
+def test_frontmatter_reference_note_has_a_category_and_excerpt(tmp_path: Path) -> None:
+    page = tmp_path / "index.qmd"
+    text = "---\ntitle: Home\nimage: cover.png\n---\n# Home\n"
+    _, _, _, blockers = rewrite_document(text, page, (Move(page, tmp_path / "docs/index.qmd"),))
+    note = next(n for n in blockers if n.category == "Frontmatter references")
+    assert note.line == 3
+    assert note.snippet == "image: cover.png"
+
+
+def test_broken_reference_note_has_a_category_and_excerpt(tmp_path: Path) -> None:
+    page = tmp_path / "index.qmd"
+    (tmp_path / "other.qmd").write_text("# Other\n")
+    (tmp_path / "other.md").write_text("# Other\n")
+    text = "see\n[Other](other.html)\n"
+    _, _, _, blockers = rewrite_document(text, page, (Move(page, tmp_path / "docs/index.qmd"),))
+    note = next(n for n in blockers if n.category == "Broken references")
+    assert note.line == 2
+    assert note.snippet == "[Other](other.html)"
