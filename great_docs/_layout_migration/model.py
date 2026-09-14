@@ -13,6 +13,31 @@ class MigrationError(ValueError):
     """Input that cannot be migrated without changing its meaning"""
 
 
+class Note(str):
+    """A follow-up item or blocking conflict, grouped by category with an optional excerpt"""
+
+    category: str
+    path: Path | None
+    line: int | None
+    snippet: str | None
+
+    def __new__(
+        cls,
+        message: str,
+        *,
+        category: str,
+        path: Path | None = None,
+        line: int | None = None,
+        snippet: str | None = None,
+    ) -> "Note":
+        self = super().__new__(cls, message)
+        self.category = category
+        self.path = path
+        self.line = line
+        self.snippet = snippet
+        return self
+
+
 @dataclass(frozen=True)
 class Move:
     """A source and its proposed destination"""
@@ -39,8 +64,8 @@ class Migration:
     moves: tuple[Move, ...]
     edits: tuple[Edit, ...]
     fingerprints: tuple[tuple[Path, str], ...]
-    blockers: tuple[str, ...]
-    follow_up: tuple[str, ...]
+    blockers: tuple[Note, ...]
+    follow_up: tuple[Note, ...]
 
 
 def fingerprint(path: Path) -> str:

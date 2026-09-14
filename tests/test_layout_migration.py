@@ -10,9 +10,35 @@ from yaml12 import read_yaml
 
 from great_docs._layout import Layout
 from great_docs._layout_migration import analyse
-from great_docs._layout_migration.model import MigrationError, Move, fingerprint
+from great_docs._layout_migration.model import MigrationError, Move, Note, fingerprint
 from great_docs._utils import QUARTO_YML_HEADER
 from great_docs.cli import cli
+
+
+def test_note_behaves_as_its_message_string() -> None:
+    note = Note("Review dynamic reference in a.qmd: b", category="Dynamic content")
+    assert note == "Review dynamic reference in a.qmd: b"
+    assert "dynamic reference" in note
+    assert note.category == "Dynamic content"
+    assert note.path is None
+    assert note.line is None
+    assert note.snippet is None
+
+
+def test_note_carries_location_metadata() -> None:
+    path = Path("docs/index.qmd")
+    note = Note("Review X", category="Unsupported HTML references", path=path, line=7, snippet="<img>")
+    assert note.path == path
+    assert note.line == 7
+    assert note.snippet == "<img>"
+
+
+def test_note_dedup_by_message_matches_prior_string_behaviour() -> None:
+    first = Note("Review X in a.qmd", category="A")
+    second = Note("Review X in a.qmd", category="B")
+    deduped = tuple(dict.fromkeys([first, second]))
+    assert deduped == (first,)
+    assert len(deduped) == 1
 
 
 class TerminalInput(io.BytesIO):
