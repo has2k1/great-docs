@@ -408,6 +408,10 @@ def test_asset_directory_referenced_externally_stays_protected(project: Path) ->
         "external reference" in message.lower() and "assets/chart.png" in message
         for message in result.follow_up
     )
+    note = next(
+        n for n in result.follow_up if "external reference" in n.lower() and "assets/chart.png" in n
+    )
+    assert note.category == "External references"
 
 
 def test_directory_referenced_only_from_config_path_folds_in(project: Path) -> None:
@@ -1191,3 +1195,45 @@ def test_missing_documentation_source_is_categorized(project: Path) -> None:
     result = analyse(Layout.make(project), Path("docs"))
     note = next(n for n in result.blockers if "does not exist" in n.lower() and "essays" in n)
     assert note.category == "Source conflicts"
+
+
+def test_missing_configured_input_is_categorized(project: Path) -> None:
+    put(project, "great-docs.yml", "bibliography: missing.bib\n")
+    result = analyse(Layout.make(project), Path("docs"))
+    note = next(n for n in result.blockers if "configured input does not exist" in n.lower())
+    assert note.category == "Configuration"
+
+
+def test_implicit_skill_discovery_is_retained_with_category(project: Path) -> None:
+    put(project, "skills/sample/SKILL.md", "# Demo\n")
+    result = analyse(Layout.make(project), Path("docs"))
+    note = next(n for n in result.follow_up if "skill discovery" in n.lower())
+    assert note.category == "Retained files"
+
+
+def test_unreferenced_asset_is_categorized(project: Path) -> None:
+    put(project, "assets/orphan.png", b"\x00")
+    result = analyse(Layout.make(project), Path("docs"))
+    note = next(n for n in result.blockers if "unreferenced implicit asset" in n.lower())
+    assert note.category == "Asset conflicts"
+
+
+def test_freeze_cache_conflict_is_categorized(project: Path) -> None:
+    put(project, "docs/_freeze/.gitkeep", "")
+    result = analyse(Layout.make(project), Path("docs"))
+    note = next(n for n in result.blockers if "destination cache already exists" in n.lower())
+    assert note.category == "Freeze cache conflicts"
+
+
+def test_terminal_recording_is_categorized(project: Path) -> None:
+    put(project, "user_guide/demo.termshow", "")
+    result = analyse(Layout.make(project), Path("docs"))
+    note = next(n for n in result.follow_up if "terminal recording" in n.lower())
+    assert note.category == "Terminal recordings"
+
+
+def test_automation_output_path_is_categorized(project: Path) -> None:
+    put(project, "Makefile", "publish:\n\trsync -a great-docs/_site/ remote:/var/www\n")
+    result = analyse(Layout.make(project), Path("docs"))
+    note = next(n for n in result.follow_up if "update old output paths" in n.lower())
+    assert note.category == "Output paths"
