@@ -19,7 +19,7 @@ from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from yaml12 import read_yaml
 
 from great_docs._content_naming import strip_numeric_prefix
-from great_docs._source_refs import fenced_code_spans, source_reference_spans
+from great_docs._source_refs import fenced_code_spans, inline_code_spans, source_reference_spans
 
 from .model import MigrationError, Move, absolute_path, check_symlinks, moved_path
 
@@ -107,7 +107,7 @@ def _denormalize(
 
 
 _GENERATED_REFERENCE = re.compile(
-    r"(?:\.\.?/)*reference/[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\.(?:html|qmd)\Z"
+    r"(?:\.\.?/)*(?:reference/[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\.(?:html|qmd)|llms(?:-full)?\.txt)\Z"
 )
 _PATH_FIELDS = (
     ("user_guide",),
@@ -460,11 +460,11 @@ def rewrite_document(
             follow_up.append(f"Review dynamic code and working-directory assumptions in {source}")
         if "{{<" in text:
             follow_up.append(f"Review Quarto shortcode inputs in {source}")
-            fenced = fenced_code_spans(text)
+            protected = fenced_code_spans(text) + inline_code_spans(text)
             matches = [
                 match
                 for match in re.finditer(r"\{\{<\s*(?:include|code-include)\s+([^>]+?)\s*>}}", text)
-                if not any(start <= match.start() < end for start, end in fenced)
+                if not any(start <= match.start() < end for start, end in protected)
             ]
             for match in reversed(matches):
                 raw = match[1]
