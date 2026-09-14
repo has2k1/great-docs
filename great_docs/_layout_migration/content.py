@@ -374,7 +374,7 @@ def rewrite_document(
     *,
     generated_homepage: Path | None = None,
     content_directories: tuple[ContentDirectory, ...] = (),
-) -> tuple[str, tuple[Path, ...], tuple[str, ...], tuple[str, ...]]:
+) -> tuple[str, tuple[Path, ...], tuple[Note, ...], tuple[Note, ...]]:
     """
     Rebase static document destinations against their original source targets
 

@@ -818,7 +818,7 @@ def analyse(layout: Layout, destination: Path) -> Migration:
         materialised = set_config_values(text, implicit)
         amended = read_config(materialised)
     except MigrationError as error:
-        blockers.append(str(error))
+        blockers.append(Note(str(error), category="Configuration", path=config_path))
         materialised, amended = text, config
     documents: set[Path] = set()
     config_referenced: set[Path] = set()
@@ -851,21 +851,41 @@ def analyse(layout: Layout, destination: Path) -> Migration:
                 )
             if not source.exists():
                 blockers.append(
-                    f"Configured input does not exist for {'.'.join(map(str, option))}: {source}"
+                    Note(
+                        f"Configured input does not exist for {'.'.join(map(str, option))}: {source}",
+                        category="Configuration",
+                        path=source,
+                    )
                 )
             if not source.is_relative_to(root):
                 follow_up.append(
-                    f"Retain external input for {'.'.join(map(str, option))}: {source}"
+                    Note(
+                        f"Retain external input for {'.'.join(map(str, option))}: {source}",
+                        category="Retained files",
+                        path=source,
+                    )
                 )
             if Path(value).is_absolute() and moved_path(source, tuple(moves)) != source:
                 blockers.append(
-                    f"An unchanged absolute reference would point into a moved source: {source}"
+                    Note(
+                        f"An unchanged absolute reference would point into a moved source: {source}",
+                        category="Configuration",
+                        path=source,
+                    )
                 )
             if "pre_render" in option:
                 never_fold_in.add(source)
-                follow_up.append(f"Review working-directory assumptions in render script {source}")
+                follow_up.append(
+                    Note(
+                        f"Review working-directory assumptions in render script {source}",
+                        category="Dynamic content",
+                        path=source,
+                    )
+                )
         except (OSError, ValueError) as error:
-            blockers.append(f"Cannot inspect configured input {option}: {error}")
+            blockers.append(
+                Note(f"Cannot inspect configured input {option}: {error}", category="I/O errors")
+            )
 
     for move in moves:
         if not retain(move.source):
@@ -879,7 +899,11 @@ def analyse(layout: Layout, destination: Path) -> Migration:
                 documents.add(path)
             elif moves:
                 follow_up.append(
-                    f"Review reStructuredText references to moved documentation in {path}"
+                    Note(
+                        f"Review reStructuredText references to moved documentation in {path}",
+                        category="Unsupported references",
+                        path=path,
+                    )
                 )
     follow_up.extend(
         _fold_in_static_directories(
@@ -902,7 +926,7 @@ def analyse(layout: Layout, destination: Path) -> Migration:
         if rewritten != before:
             edits.append(Edit(config_path, before, rewritten))
     except MigrationError as error:
-        blockers.append(str(error))
+        blockers.append(Note(str(error), category="Configuration", path=config_path))
 
     generated_homepage = None
     if not any((root / name).exists() for name in ("index.qmd", "index.md")) and any(
@@ -929,10 +953,16 @@ def analyse(layout: Layout, destination: Path) -> Migration:
                     edits.append(Edit(path, content, after))
                 else:
                     blockers.append(
-                        f"A retained external document needs reference edits before migration: {path}"
+                        Note(
+                            f"A retained external document needs reference edits before migration: {path}",
+                            category="Retained files",
+                            path=path,
+                        )
                     )
         except (OSError, UnicodeError, ValueError) as error:
-            blockers.append(f"Cannot inspect document {path}: {error}")
+            blockers.append(
+                Note(f"Cannot inspect document {path}: {error}", category="I/O errors", path=path)
+            )
 
     for doc in sorted(documents):
         try:
@@ -953,7 +983,13 @@ def analyse(layout: Layout, destination: Path) -> Migration:
             if moved_path(target, tuple(moves)) == target and (
                 not target.is_relative_to(destination)
             ):
-                follow_up.append(f"Review: external reference from {doc} to {target}")
+                follow_up.append(
+                    Note(
+                        f"Review: external reference from {doc} to {target}",
+                        category="External references",
+                        path=doc,
+                    )
+                )
 
     assets = root / "assets"
     referenced = set(fingerprints)
@@ -961,7 +997,11 @@ def analyse(layout: Layout, destination: Path) -> Migration:
         for path in tree_files(assets):
             if path not in referenced:
                 blockers.append(
-                    f"Cannot preserve unreferenced implicit asset publication automatically: {path}"
+                    Note(
+                        f"Cannot preserve unreferenced implicit asset publication automatically: {path}",
+                        category="Asset conflicts",
+                        path=path,
+                    )
                 )
 
     freeze = root / "_freeze"
@@ -969,10 +1009,22 @@ def analyse(layout: Layout, destination: Path) -> Migration:
     freeze_paths: set[Path] = set()
     retain(freeze)
     if target_freeze.exists() or target_freeze.is_symlink():
-        blockers.append(f"Destination cache already exists: {target_freeze}")
+        blockers.append(
+            Note(
+                f"Destination cache already exists: {target_freeze}",
+                category="Freeze cache conflicts",
+                path=target_freeze,
+            )
+        )
     if freeze.exists() or freeze.is_symlink():
         if not freeze.is_dir():
-            blockers.append(f"Persistent cache must be a directory: {freeze}")
+            blockers.append(
+                Note(
+                    f"Persistent cache must be a directory: {freeze}",
+                    category="Freeze cache conflicts",
+                    path=freeze,
+                )
+            )
         moves.append(Move(freeze, target_freeze))
         freeze_paths.update(path.relative_to(freeze) for path in freeze.rglob("*"))
     else:
@@ -985,21 +1037,37 @@ def analyse(layout: Layout, destination: Path) -> Migration:
                 for path in tree_files(cache):
                     recovered[target_freeze / path.relative_to(cache)] = path.read_bytes()
             except (OSError, MigrationError) as error:
-                blockers.append(f"Cannot recover cache from {cache}: {error}")
+                blockers.append(
+                    Note(
+                        f"Cannot recover cache from {cache}: {error}",
+                        category="Freeze cache conflicts",
+                        path=cache,
+                    )
+                )
         for path, content in sorted(recovered.items()):
             if any(parent in recovered for parent in path.parents):
-                blockers.append(f"Recovered cache files overlap a directory: {path}")
+                blockers.append(
+                    Note(
+                        f"Recovered cache files overlap a directory: {path}",
+                        category="Freeze cache conflicts",
+                        path=path,
+                    )
+                )
             edits.append(Edit(path, None, content))
             freeze_paths.add(path.relative_to(target_freeze))
     if freeze.exists() or freeze_paths:
         try:
             _check_freeze_ignore_policy(root, destination, freeze_paths, retain, retain_policy)
         except (OSError, UnicodeError, MigrationError) as error:
-            blockers.append(str(error))
+            blockers.append(Note(str(error), category="Freeze cache conflicts", path=freeze))
     for build in generated:
         retain(build / "_quarto.yml")
         follow_up.append(
-            f"Retain generated project {build}; the next build publishes to {destination / '_site'}"
+            Note(
+                f"Retain generated project {build}; the next build publishes to {destination / '_site'}",
+                category="Retained files",
+                path=build,
+            )
         )
     ignore = root / ".gitignore"
     if retain(ignore):
@@ -1022,7 +1090,9 @@ def analyse(layout: Layout, destination: Path) -> Migration:
                 )
                 edits.append(Edit(ignore, original, updated.encode("utf-8")))
         except (OSError, UnicodeError) as error:
-            blockers.append(f"Cannot inspect ignore rules {ignore}: {error}")
+            blockers.append(
+                Note(f"Cannot inspect ignore rules {ignore}: {error}", category="I/O errors", path=ignore)
+            )
 
     automation = [root / "Makefile", root / "justfile", root / "tox.ini", root / "noxfile.py"]
     for directory in (root / ".github/workflows", root / "scripts"):
@@ -1033,12 +1103,14 @@ def analyse(layout: Layout, destination: Path) -> Migration:
             automation.append(path)
 
     def report_walk_error(error: OSError) -> None:
-        blockers.append(f"Cannot inspect implicit documentation inputs: {error}")
+        blockers.append(
+            Note(f"Cannot inspect implicit documentation inputs: {error}", category="I/O errors")
+        )
 
     try:
         ignored = _ignored_paths(root)
     except (OSError, MigrationError) as error:
-        blockers.append(f"Cannot inspect git ignore rules: {error}")
+        blockers.append(Note(f"Cannot inspect git ignore rules: {error}", category="I/O errors"))
         ignored = None
     for directory, children, names in os.walk(root, onerror=report_walk_error, followlinks=False):
         parent = Path(directory)
@@ -1049,7 +1121,13 @@ def analyse(layout: Layout, destination: Path) -> Migration:
                 retain(path)
                 retain(path.with_suffix(".yml"))
                 retain(path.with_suffix(".yaml"))
-                follow_up.append(f"Review terminal recording and companion YAML paths in {path}")
+                follow_up.append(
+                    Note(
+                        f"Review terminal recording and companion YAML paths in {path}",
+                        category="Terminal recordings",
+                        path=path,
+                    )
+                )
     for path in dict.fromkeys(automation):
         if not path.is_file() or not retain(path):
             continue
@@ -1059,14 +1137,26 @@ def analyse(layout: Layout, destination: Path) -> Migration:
                 r"great-docs(?:-[\w.-]+)?[/\\]_site|great-docs(?:-[\w.-]+)?/", automation_text
             ):
                 follow_up.append(
-                    f"Update old output paths in {path}; publish {destination / '_site'}"
+                    Note(
+                        f"Update old output paths in {path}; publish {destination / '_site'}",
+                        category="Output paths",
+                        path=path,
+                    )
                 )
         except (OSError, UnicodeError) as error:
-            blockers.append(f"Cannot inspect automation {path}: {error}")
+            blockers.append(
+                Note(f"Cannot inspect automation {path}: {error}", category="I/O errors", path=path)
+            )
     skill = root / "skills" / package / "SKILL.md"
     if package and skill.is_file():
         retain(skill)
-        follow_up.append(f"Review implicit skill discovery for retained input {skill}")
+        follow_up.append(
+            Note(
+                f"Review implicit skill discovery for retained input {skill}",
+                category="Retained files",
+                path=skill,
+            )
+        )
     sources = (
         config.get("interlinks", {}).get("sources", {})
         if isinstance(config.get("interlinks"), dict)
@@ -1077,7 +1167,10 @@ def analyse(layout: Layout, destination: Path) -> Migration:
             value = entry.get("url") if isinstance(entry, dict) else None
             if isinstance(value, str) and local_path(value, root) is not None:
                 follow_up.append(
-                    f"Review inventory location and published URL together for interlinks.sources.{name}.url: {value}"
+                    Note(
+                        f"Review inventory location and published URL together for interlinks.sources.{name}.url: {value}",
+                        category="Configuration",
+                    )
                 )
     site = config.get("site")
     if isinstance(site, dict):
@@ -1088,17 +1181,30 @@ def analyse(layout: Layout, destination: Path) -> Migration:
                 and re.search(r"[/\\]|\.(?:html|qmd|css|js|png|svg)$", value)
                 and local_path(value, root) is not None
             ):
-                follow_up.append(f"Review unsupported Quarto path option site.{name}: {value}")
+                follow_up.append(
+                    Note(
+                        f"Review unsupported Quarto path option site.{name}: {value}",
+                        category="Configuration",
+                    )
+                )
     targets = [move.destination for move in moves]
     targets.extend(edit.path for edit in edits if edit.before is None)
     for target in targets:
         try:
             check_symlinks(target)
             if target.exists() or target.is_symlink():
-                blockers.append(f"Destination already exists: {target}")
+                blockers.append(
+                    Note(f"Destination already exists: {target}", category="Destination conflicts", path=target)
+                )
             for parent in target.parents:
                 if parent.exists() and not parent.is_dir():
-                    blockers.append(f"Destination component is not a directory: {parent}")
+                    blockers.append(
+                        Note(
+                            f"Destination component is not a directory: {parent}",
+                            category="Destination conflicts",
+                            path=parent,
+                        )
+                    )
         except (OSError, MigrationError) as error:
-            blockers.append(str(error))
+            blockers.append(Note(str(error), category="Destination conflicts", path=target))
     return result()
