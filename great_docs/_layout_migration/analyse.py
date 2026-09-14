@@ -370,13 +370,13 @@ def _exclusive_to_moving_content(
     moves: list[Move],
     content_directories: tuple[ContentDirectory, ...],
     generated: list[Path],
-    blockers: list[str],
+    blockers: list[Note],
 ) -> set[Path]:
     """Return which candidates are referenced only from content already moving"""
     try:
         ignored = _ignored_paths(root)
     except (OSError, MigrationError) as error:
-        blockers.append(f"Cannot inspect git ignore rules: {error}")
+        blockers.append(Note(f"Cannot inspect git ignore rules: {error}", category="I/O errors"))
         ignored = None
     non_moving: set[Path] = set()
     for directory, children, names in os.walk(root, followlinks=False):
@@ -419,8 +419,8 @@ def _categorize_move_contents(
     move: Move,
     config_path: Path,
     documents: set[Path],
-    blockers: list[str],
-    follow_up: list[str],
+    blockers: list[Note],
+    follow_up: list[Note],
 ) -> None:
     """Classify every file a move brings in, the same way for every move"""
     try:
@@ -471,8 +471,8 @@ def _fold_in_static_directories(
     never_fold_in: set[Path],
     retain: Callable[[Path], bool],
     generated: list[Path],
-    blockers: list[str],
-) -> list[str]:
+    blockers: list[Note],
+) -> list[Note]:
     """
     Move a top-level directory into the destination when only moving content needs it
 
@@ -483,7 +483,7 @@ def _fold_in_static_directories(
     pass adds to it. Return the follow-up notes for directories deliberately left in
     place, alongside the per-file notes the folded-in directories raise.
     """
-    follow_up: list[str] = []
+    follow_up: list[Note] = []
     folded: set[Path] = {move.source for move in moves}
     while True:
         referenced: set[Path] = set(config_referenced)
@@ -518,7 +518,11 @@ def _fold_in_static_directories(
         for candidate in to_fold:
             if candidate not in exclusive:
                 follow_up.append(
-                    f"Retain {candidate} in place; something outside the moving documentation still references it"
+                    Note(
+                        f"Retain {candidate} in place; something outside the moving documentation still references it",
+                        category="Retained files",
+                        path=candidate,
+                    )
                 )
                 folded.add(candidate)
                 continue
@@ -557,8 +561,8 @@ def analyse(layout: Layout, destination: Path) -> Migration:
     moves: list[Move] = []
     edits: list[Edit] = []
     fingerprints: dict[Path, str] = {}
-    blockers: list[str] = []
-    follow_up: list[str] = []
+    blockers: list[Note] = []
+    follow_up: list[Note] = []
 
     def result() -> Migration:
         return Migration(
