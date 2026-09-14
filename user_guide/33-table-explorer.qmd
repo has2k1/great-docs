@@ -8,7 +8,7 @@ versions: ">=0.10"
 # Table Explorer
 
 The `tbl_explorer()` function generates an interactive table widget from tabular data. Where
-[`tbl_preview()`](30-table-previews.qmd) produces a static, JavaScript-free snapshot of a dataset,
+[`tbl_preview()`](32-table-previews.qmd) produces a static, JavaScript-free snapshot of a dataset,
 `tbl_explorer()` embeds all rows as inline JSON and progressively enhances a static fallback table
 with interactive controls: sorting, token-based filtering, pagination, column toggling,
 copy-to-clipboard, and CSV download.

@@ -37,4 +37,4 @@ Keep video files small. Git repositories aren't ideal for large binary files. Fo
 
 ## More Options
 
-For full details on aspect ratios, start times, accessibility labels, Vimeo, Loom, cross-referencing, and performance tips, see the [Videos](../user_guide/20-videos.qmd) page in the User Guide.
+For full details on aspect ratios, start times, accessibility labels, Vimeo, Loom, cross-referencing, and performance tips, see the [Videos](../user_guide/22-videos.qmd) page in the User Guide.
