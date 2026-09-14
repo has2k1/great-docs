@@ -1079,3 +1079,27 @@ def test_bare_numeric_prefix_reference_is_not_a_broken_link(project: Path) -> No
     put(project, "user_guide/01-installation.qmd", "# Installation")
     result = analyse(Layout.make(project), Path("docs"))
     assert not result.blockers
+
+
+def test_inline_code_include_example_is_not_rewritten(project: Path) -> None:
+    put(project, "user_guide/authoring.qmd", "Include syntax: `{{< include file.qmd >}}`\n")
+    result = analyse(Layout.make(project), Path("docs"))
+    assert not result.blockers
+
+
+def test_real_missing_include_still_blocks(project: Path) -> None:
+    put(project, "user_guide/page.qmd", "{{< include missing.qmd >}}\n")
+    result = analyse(Layout.make(project), Path("docs"))
+    assert any("missing.qmd" in message for message in result.blockers)
+
+
+@pytest.mark.parametrize("name", ["llms.txt", "llms-full.txt"])
+def test_llms_txt_reference_does_not_block_analysis(project: Path, name: str) -> None:
+    put(
+        project,
+        "great-docs.yml",
+        "module: sample\nskill:\n  skills:\n    - name: sample\n      file: skills/sample/SKILL.md\n",
+    )
+    put(project, "skills/sample/SKILL.md", f"[{name}]({name})\n")
+    result = analyse(Layout.make(project), Path("docs"))
+    assert not result.blockers

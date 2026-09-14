@@ -197,3 +197,28 @@ def fenced_code_spans(content: str) -> list[tuple[int, int]]:
     if fence and not raw:
         spans.append((start, offset))
     return spans
+
+
+def inline_code_spans(content: str) -> list[tuple[int, int]]:
+    """
+    Locate inline code spans outside fenced code blocks
+
+    Mask fenced regions first, using `fenced_code_spans`, so a backtick
+    that opens or closes a fence line is never mistaken for an inline
+    code delimiter.
+
+    Parameters
+    ----------
+    content
+        The Markdown source to scan.
+
+    Returns
+    -------
+    list[tuple[int, int]]
+        Character-offset spans covering each inline code span, backticks included.
+    """
+    masked = list(content)
+    for start, end in fenced_code_spans(content):
+        masked[start:end] = ["\n" if char == "\n" else " " for char in content[start:end]]
+    visible = "".join(masked)
+    return [match.span() for match in _INLINE_CODE.finditer(visible)]
