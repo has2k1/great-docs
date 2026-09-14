@@ -479,4 +479,4 @@ needing your computational environment.
 detailed examples and CI patterns
 - [Freeze Demo](../recipes/freeze-demo.qmd): a live page with frozen outputs you can inspect
 - [Configuration](configuration.qmd): all `great-docs.yml` options including `pre_render`
-- [Publishing](publishing.qmd): deploying your site to GitHub Pages, Netlify, or other hosts
+- [Publishing](14-deployment.qmd): deploying your site to GitHub Pages, Netlify, or other hosts

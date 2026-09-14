@@ -21,7 +21,7 @@ mode, requires no JavaScript, and is safe to embed in RSS feeds, emails, or stat
 
 This guide walks through every feature, starting from the simplest Python call and building up to
 the Quarto shortcode, file format support, and advanced display options. For interactive tables with
-sorting, filtering, and pagination, see the companion [Table Explorer](31-table-explorer.qmd) guide.
+sorting, filtering, and pagination, see the companion [Table Explorer](33-table-explorer.qmd) guide.
 
 ## Quick Start
 
