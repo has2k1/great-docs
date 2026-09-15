@@ -367,7 +367,9 @@ def test_dynamic_reference_note_has_a_category_and_excerpt(tmp_path: Path) -> No
     text = "before\n![Chart](${base}/chart.png)\n"
     _, _, follow_up, _ = rewrite_document(text, page, (Move(page, tmp_path / "docs/index.qmd"),))
     note = next(
-        n for n in follow_up if n.category == "Dynamic Code to Verify" and "reference" in n.lower()
+        n
+        for n in follow_up
+        if n.category == "Dynamic References to Review" and "reference" in n.lower()
     )
     assert note.path == page
     assert note.line == 2
@@ -403,9 +405,7 @@ def test_dynamic_code_note_has_a_category_and_excerpt(tmp_path: Path) -> None:
     page = tmp_path / "index.qmd"
     text = 'text\n```{python}\nopen("x")\n```\n'
     _, _, follow_up, _ = rewrite_document(text, page, (Move(page, tmp_path / "docs/index.qmd"),))
-    note = next(
-        n for n in follow_up if n.category == "Dynamic Code to Verify" and "code" in n.lower()
-    )
+    note = next(n for n in follow_up if n.category == "Code Blocks to Verify")
     assert note.line == 2
     assert note.snippet == "```{python}"
 

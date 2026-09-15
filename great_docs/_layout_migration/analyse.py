@@ -445,7 +445,7 @@ def _categorize_move_contents(
                 follow_up.append(
                     Note(
                         f"Review dynamic code, notebook references, and working-directory assumptions in {path}",
-                        category="Dynamic Code to Verify",
+                        category="Scripts and Notebooks to Verify",
                         path=path,
                     )
                 )
@@ -899,7 +899,7 @@ def analyse(layout: Layout, destination: Path) -> Migration:
                 follow_up.append(
                     Note(
                         f"Review working-directory assumptions in render script {source}",
-                        category="Dynamic Code to Verify",
+                        category="Scripts and Notebooks to Verify",
                         path=source,
                     )
                 )
