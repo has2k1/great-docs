@@ -161,7 +161,7 @@ def test_dry_run_report_prints_move_count_header(project: Path) -> None:
         cli, ["migrate-layout", "--project-path", str(project), "--dry-run", "--yes"]
     )
     assert result.exit_code == 0, result.output
-    assert "Item to Move (1)" in result.output
+    assert "File / Folder to Move (1)" in result.output
     assert "great-docs.yml -> docs/great-docs.yml" in result.output
     assert "to Review" not in result.output
     assert "Blocking Problem" not in result.output
@@ -175,7 +175,7 @@ def test_dry_run_report_groups_review_items_by_category(project: Path) -> None:
         cli, ["migrate-layout", "--project-path", str(project), "--dry-run", "--yes"]
     )
     assert result.exit_code == 0, result.output
-    assert "Item to Review (1)" in result.output
+    assert "File to Review (1)" in result.output
     assert "reStructuredText Files to Check (1)" in result.output
     assert "essays/notes.rst" in result.output
 
@@ -248,15 +248,28 @@ def test_dry_run_report_keeps_trailing_detail_for_old_output_paths(project: Path
     assert str(project / "docs/_site") in result.output
 
 
-def test_dry_run_report_shows_bare_path_for_files_staying_in_place(project: Path) -> None:
+def test_dry_run_report_shows_bare_path_for_skill_discovery(project: Path) -> None:
     put(project, "skills/sample/SKILL.md", "# Demo\n")
     result = CliRunner().invoke(
         cli, ["migrate-layout", "--project-path", str(project), "--dry-run", "--yes"]
     )
     assert result.exit_code == 0, result.output
-    assert "Files Staying in Place (1)" in result.output
+    assert "Skill Discovery to Verify (1)" in result.output
     assert "skills/sample/SKILL.md" in result.output
     assert "Review implicit skill discovery" not in result.output
+
+
+def test_dry_run_report_keeps_the_reason_for_files_retained_as_is(project: Path) -> None:
+    put(project, "assets/chart.png", b"\x00\xff")
+    put(project, "user_guide/page.qmd", "![Chart](../assets/chart.png)\n")
+    put(project, "README.md", "![Chart](assets/chart.png)\n")
+    result = CliRunner().invoke(
+        cli, ["migrate-layout", "--project-path", str(project), "--dry-run", "--yes"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "Files Retained As-Is (1)" in result.output
+    assert "something outside the moving documentation still references it" in result.output
+    assert "assets" in result.output
 
 
 def test_dry_run_report_styles_section_headers_when_color_is_forced(project: Path) -> None:
@@ -266,7 +279,7 @@ def test_dry_run_report_styles_section_headers_when_color_is_forced(project: Pat
         color=True,
     )
     assert result.exit_code == 0, result.output
-    assert click.style("Item to Move (1)", bold=True) in result.output
+    assert click.style("File / Folder to Move (1)", bold=True) in result.output
 
 
 def test_dry_run_report_styles_review_paths_red_when_color_is_forced(project: Path) -> None:
@@ -1383,7 +1396,7 @@ def test_implicit_skill_discovery_is_retained_with_category(project: Path) -> No
     put(project, "skills/sample/SKILL.md", "# Demo\n")
     result = analyse(Layout.make(project), Path("docs"))
     note = next(n for n in result.follow_up if "skill discovery" in n.lower())
-    assert note.category == "Files Staying in Place"
+    assert note.category == "Skill Discovery to Verify"
 
 
 def test_unreferenced_asset_is_categorized(project: Path) -> None:

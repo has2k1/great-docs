@@ -814,7 +814,8 @@ _SUBJECT_ONLY_CATEGORIES = frozenset(
         "References Outside the Move",
         "Assets With Unclear Ownership",
         "Old Output Paths to Update",
-        "Files Staying in Place",
+        "References to Edit Before Migrating",
+        "Skill Discovery to Verify",
     }
 )
 
