@@ -244,8 +244,7 @@ def test_dry_run_report_keeps_trailing_detail_for_old_output_paths(project: Path
     )
     assert result.exit_code == 0, result.output
     assert "Old Output Paths to Update (1)" in result.output
-    assert "Makefile; publish " in result.output
-    assert str(project / "docs/_site") in result.output
+    assert "Makefile; publish docs/_site" in result.output
 
 
 def test_dry_run_report_does_not_flag_a_curated_skill_file(project: Path) -> None:

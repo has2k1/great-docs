@@ -1177,7 +1177,8 @@ def analyse(layout: Layout, destination: Path) -> Migration:
             ):
                 follow_up.append(
                     Note(
-                        f"Update old output paths in {path}; publish {destination / '_site'}",
+                        f"Update old output paths in {path}; publish "
+                        f"{os.path.relpath(destination / '_site', root)}",
                         category="Old Output Paths to Update",
                         path=path,
                     )
