@@ -1195,7 +1195,8 @@ def analyse(layout: Layout, destination: Path) -> Migration:
         retain(skill)
         follow_up.append(
             Note(
-                f"Review implicit skill discovery for retained input {skill}",
+                f"{skill} stays in place. If you migrated to a custom destination, check it "
+                "for hardcoded paths like docs/... that assume the default layout",
                 category="Skill Discovery to Verify",
                 path=skill,
             )
