@@ -367,6 +367,14 @@ def _locate(text: str, offset: int) -> tuple[int, str]:
     return line, text[start : end if end != -1 else len(text)]
 
 
+_SHORTCODE = re.compile(r"\{\{<\s*([\w-]+)\s+([^>]+?)\s*>}}")
+_SHORTCODE_FILE_ARGUMENT = re.compile(
+    r"[/\\]|\.(?:qmd|ipynb|py|r|jl|md|mp4|webm|mov|m4v|mp3|wav|ogg|pdf"
+    r"|png|jpe?g|gif|svg|webp|csv|json|ya?ml)\b",
+    re.IGNORECASE,
+)
+
+
 def rewrite_document(
     text: str,
     source: Path,
@@ -495,17 +503,28 @@ def rewrite_document(
                 )
             )
         if "{{<" in text:
-            line, snippet = _locate(text, text.index("{{<"))
-            follow_up.append(
-                Note(
-                    f"Review Quarto shortcode inputs in {source}",
-                    category="Shortcodes to Check",
-                    path=source,
-                    line=line,
-                    snippet=snippet,
-                )
-            )
             protected = fenced_code_spans(text) + inline_code_spans(text)
+            flagged = next(
+                (
+                    shortcode
+                    for shortcode in _SHORTCODE.finditer(text)
+                    if shortcode[1] not in {"include", "code-include"}
+                    and _SHORTCODE_FILE_ARGUMENT.search(shortcode[2])
+                    and not any(start <= shortcode.start() < end for start, end in protected)
+                ),
+                None,
+            )
+            if flagged is not None:
+                line, snippet = _locate(text, flagged.start())
+                follow_up.append(
+                    Note(
+                        f"Review Quarto shortcode inputs in {source}",
+                        category="Shortcodes to Check",
+                        path=source,
+                        line=line,
+                        snippet=snippet,
+                    )
+                )
             matches = [
                 match
                 for match in re.finditer(r"\{\{<\s*(?:include|code-include)\s+([^>]+?)\s*>}}", text)
@@ -548,7 +567,9 @@ def rewrite_document(
                 new_reference = Path(os.path.relpath(moved, relocated.parent)).as_posix()
                 start, end = match.span(1)
                 text = text[:start] + new_reference + text[end:]
-        html_match = re.search(r"\b(?:srcset|data-src|style)\s*=", text)
+        html_match = re.search(r"\b(?:srcset|data-src)\s*=", text) or re.search(
+            r"""\bstyle\s*=\s*["'][^"']*\burl\(""", text
+        )
         if html_match:
             line, snippet = _locate(text, html_match.start())
             follow_up.append(
