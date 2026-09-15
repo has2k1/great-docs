@@ -449,11 +449,11 @@ def _categorize_move_contents(
                         path=path,
                     )
                 )
-            elif path.suffix.lower() in {".rst", ".termshow"}:
+            elif path.suffix.lower() == ".rst":
                 follow_up.append(
                     Note(
-                        f"Review unsupported document or companion-file references in {path}",
-                        category="Unsupported File Types to Check",
+                        f"Review reStructuredText references in {path}",
+                        category="reStructuredText Files to Check",
                         path=path,
                     )
                 )
@@ -925,7 +925,7 @@ def analyse(layout: Layout, destination: Path) -> Migration:
                 follow_up.append(
                     Note(
                         f"Review reStructuredText references to moved documentation in {path}",
-                        category="Unsupported File Types to Check",
+                        category="reStructuredText Files to Check",
                         path=path,
                     )
                 )
