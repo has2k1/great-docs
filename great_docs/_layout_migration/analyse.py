@@ -1091,7 +1091,11 @@ def analyse(layout: Layout, destination: Path) -> Migration:
                 edits.append(Edit(ignore, original, updated.encode("utf-8")))
         except (OSError, UnicodeError) as error:
             blockers.append(
-                Note(f"Cannot inspect ignore rules {ignore}: {error}", category="I/O errors", path=ignore)
+                Note(
+                    f"Cannot inspect ignore rules {ignore}: {error}",
+                    category="I/O errors",
+                    path=ignore,
+                )
             )
 
     automation = [root / "Makefile", root / "justfile", root / "tox.ini", root / "noxfile.py"]
@@ -1194,7 +1198,11 @@ def analyse(layout: Layout, destination: Path) -> Migration:
             check_symlinks(target)
             if target.exists() or target.is_symlink():
                 blockers.append(
-                    Note(f"Destination already exists: {target}", category="Destination conflicts", path=target)
+                    Note(
+                        f"Destination already exists: {target}",
+                        category="Destination conflicts",
+                        path=target,
+                    )
                 )
             for parent in target.parents:
                 if parent.exists() and not parent.is_dir():

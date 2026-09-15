@@ -737,7 +737,9 @@ def _print_migration(migration: Migration) -> None:
                 before = (edit.before or b"").decode("utf-8")
                 after = edit.after.decode("utf-8")
             except UnicodeError:
-                click.echo(f"    Write {len(edit.after)} bytes; preserve the original for recovery.")
+                click.echo(
+                    f"    Write {len(edit.after)} bytes; preserve the original for recovery."
+                )
             else:
                 for line in difflib.unified_diff(
                     before.splitlines(), after.splitlines(), fromfile=path, tofile=path, lineterm=""
@@ -751,11 +753,13 @@ def _print_migration(migration: Migration) -> None:
                     else:
                         click.echo(line)
         click.echo()
-    _print_notes("Needs review", migration.follow_up, "yellow")
-    _print_notes("Blocked", migration.blockers, "red", err=True)
+    _print_notes("Needs review", migration.follow_up, "yellow", root=root)
+    _print_notes("Blocked", migration.blockers, "red", root=root, err=True)
 
 
-def _print_notes(label: str, notes: "tuple[Note, ...]", color: str, *, err: bool = False) -> None:
+def _print_notes(
+    label: str, notes: "tuple[Note, ...]", color: str, *, root: Path, err: bool = False
+) -> None:
     """Print a count-headed, category-grouped section of migration notes"""
     if not notes:
         return
@@ -766,8 +770,9 @@ def _print_notes(label: str, notes: "tuple[Note, ...]", color: str, *, err: bool
     for category, items in categories.items():
         click.echo(click.style(f"  {category} ({len(items)})", bold=True), err=err)
         for note in items:
-            if note.line is not None and note.snippet is not None:
-                location = click.style(f"{note.path}:{note.line}:", fg="cyan")
+            if note.path is not None and note.line is not None and note.snippet is not None:
+                display_path = os.path.relpath(note.path, root)
+                location = click.style(f"{display_path}:{note.line}:", fg="cyan")
                 click.echo(f"    {location} {note.snippet}", err=err)
             else:
                 click.echo(f"    {note}", err=err)

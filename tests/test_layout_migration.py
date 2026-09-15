@@ -28,7 +28,9 @@ def test_note_behaves_as_its_message_string() -> None:
 
 def test_note_carries_location_metadata() -> None:
     path = Path("docs/index.qmd")
-    note = Note("Review X", category="Unsupported HTML references", path=path, line=7, snippet="<img>")
+    note = Note(
+        "Review X", category="Unsupported HTML references", path=path, line=7, snippet="<img>"
+    )
     assert note.path == path
     assert note.line == 7
     assert note.snippet == "<img>"
@@ -40,6 +42,26 @@ def test_note_dedup_by_message_matches_prior_string_behaviour() -> None:
     deduped = tuple(dict.fromkeys([first, second]))
     assert deduped == (first,)
     assert len(deduped) == 1
+
+
+def test_note_survives_copy_and_deepcopy() -> None:
+    import copy
+
+    note = Note(
+        "Review X in a.qmd",
+        category="Unsupported HTML references",
+        path=Path("a.qmd"),
+        line=3,
+        snippet="<img>",
+    )
+    shallow = copy.copy(note)
+    deep = copy.deepcopy(note)
+    for copied in (shallow, deep):
+        assert copied == note
+        assert copied.category == "Unsupported HTML references"
+        assert copied.path == Path("a.qmd")
+        assert copied.line == 3
+        assert copied.snippet == "<img>"
 
 
 class TerminalInput(io.BytesIO):
@@ -183,7 +205,7 @@ def test_dry_run_report_prints_a_located_excerpt(project: Path) -> None:
         cli, ["migrate-layout", "--project-path", str(project), "--dry-run", "--yes"]
     )
     assert result.exit_code == 0, result.output
-    assert f"{project / 'index.qmd'}:2:" in result.output
+    assert "index.qmd:2:" in result.output
     assert "srcset" in result.output
 
 
