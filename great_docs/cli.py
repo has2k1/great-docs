@@ -729,7 +729,12 @@ def _print_migration(migration: Migration) -> None:
     if migration.moves:
         click.echo(
             click.style(
-                _count_phrase(len(migration.moves), "Item to Move", "Items to Move"), bold=True
+                _count_phrase(
+                    len(migration.moves),
+                    "File / Folder to Move",
+                    "Files / Folders to Move",
+                ),
+                bold=True,
             )
         )
         for move in migration.moves:
@@ -740,7 +745,12 @@ def _print_migration(migration: Migration) -> None:
     if migration.edits:
         click.echo(
             click.style(
-                _count_phrase(len(migration.edits), "File to Edit", "Files to Edit"), bold=True
+                _count_phrase(
+                    len(migration.edits),
+                    "File to be Edited",
+                    "Files to be Edited",
+                ),
+                bold=True,
             )
         )
         for edit in migration.edits:
@@ -767,13 +777,21 @@ def _print_migration(migration: Migration) -> None:
                         click.echo(line)
         click.echo()
     _print_notes(
-        _count_phrase(len(migration.follow_up), "Item to Review", "Items to Review"),
+        _count_phrase(
+            len(migration.follow_up),
+            "File to Review",
+            "Files to Review",
+        ),
         migration.follow_up,
         "yellow",
         root=root,
     )
     _print_notes(
-        _count_phrase(len(migration.blockers), "Blocking Problem", "Blocking Problems"),
+        _count_phrase(
+            len(migration.blockers),
+            "Blocking Problem",
+            "Blocking Problems",
+        ),
         migration.blockers,
         "red",
         root=root,
@@ -796,6 +814,7 @@ _SUBJECT_ONLY_CATEGORIES = frozenset(
         "References Outside the Move",
         "Assets With Unclear Ownership",
         "Old Output Paths to Update",
+        "Files Staying in Place",
     }
 )
 
@@ -806,12 +825,23 @@ _SNIPPET_SUPPRESSED_CATEGORIES = frozenset({"Code Blocks to Verify"})
 
 
 def _subject(note: "Note", root: Path) -> str:
-    """The relative path plus any fixed detail that followed it in the message"""
+    """The relative path (in red) plus any fixed detail that followed it in the message"""
     assert note.path is not None
     path_text = str(note.path)
     offset = note.rfind(path_text)
     suffix = note[offset + len(path_text) :] if offset != -1 else ""
-    return os.path.relpath(note.path, root) + suffix
+    return click.style(os.path.relpath(note.path, root), fg="red") + suffix
+
+
+def _highlight_path(note: "Note", root: Path) -> str:
+    """The note's message with its path swapped for a red, relative version"""
+    assert note.path is not None
+    path_text = str(note.path)
+    offset = note.rfind(path_text)
+    if offset == -1:
+        return str(note)
+    display_path = click.style(os.path.relpath(note.path, root), fg="red")
+    return note[:offset] + display_path + note[offset + len(path_text) :]
 
 
 def _print_notes(
@@ -828,16 +858,15 @@ def _print_notes(
         click.echo(click.style(f"  {category} ({len(items)})", bold=True), err=err)
         for note in items:
             if note.path is not None and note.line is not None and note.snippet is not None:
-                display_path = os.path.relpath(note.path, root)
+                display_path = click.style(os.path.relpath(note.path, root), fg="red")
                 if category in _SNIPPET_SUPPRESSED_CATEGORIES:
-                    click.echo(
-                        f"    {click.style(f'{display_path}:{note.line}', fg='cyan')}", err=err
-                    )
+                    click.echo(f"    {display_path}:{note.line}", err=err)
                 else:
-                    location = click.style(f"{display_path}:{note.line}:", fg="cyan")
-                    click.echo(f"    {location} {note.snippet}", err=err)
+                    click.echo(f"    {display_path}:{note.line}: {note.snippet}", err=err)
             elif note.path is not None and category in _SUBJECT_ONLY_CATEGORIES:
                 click.echo(f"    {_subject(note, root)}", err=err)
+            elif note.path is not None:
+                click.echo(f"    {_highlight_path(note, root)}", err=err)
             else:
                 click.echo(f"    {note}", err=err)
         click.echo(err=err)

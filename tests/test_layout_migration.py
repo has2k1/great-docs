@@ -248,6 +248,17 @@ def test_dry_run_report_keeps_trailing_detail_for_old_output_paths(project: Path
     assert str(project / "docs/_site") in result.output
 
 
+def test_dry_run_report_shows_bare_path_for_files_staying_in_place(project: Path) -> None:
+    put(project, "skills/sample/SKILL.md", "# Demo\n")
+    result = CliRunner().invoke(
+        cli, ["migrate-layout", "--project-path", str(project), "--dry-run", "--yes"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "Files Staying in Place (1)" in result.output
+    assert "skills/sample/SKILL.md" in result.output
+    assert "Review implicit skill discovery" not in result.output
+
+
 def test_dry_run_report_styles_section_headers_when_color_is_forced(project: Path) -> None:
     result = CliRunner().invoke(
         cli,
@@ -256,6 +267,30 @@ def test_dry_run_report_styles_section_headers_when_color_is_forced(project: Pat
     )
     assert result.exit_code == 0, result.output
     assert click.style("Item to Move (1)", bold=True) in result.output
+
+
+def test_dry_run_report_styles_review_paths_red_when_color_is_forced(project: Path) -> None:
+    put(project, "skills/sample/SKILL.md", "# Demo\n")
+    result = CliRunner().invoke(
+        cli,
+        ["migrate-layout", "--project-path", str(project), "--dry-run", "--yes"],
+        color=True,
+    )
+    assert result.exit_code == 0, result.output
+    assert click.style("skills/sample/SKILL.md", fg="red") in result.output
+
+
+def test_dry_run_report_highlights_the_path_within_a_mixed_category(project: Path) -> None:
+    put(project, "great-docs.yml", "bibliography: missing.bib\n")
+    result = CliRunner().invoke(
+        cli,
+        ["migrate-layout", "--project-path", str(project), "--dry-run", "--yes"],
+        color=True,
+    )
+    assert result.exit_code != 0
+    assert "Configuration to Review" in result.output
+    assert click.style("missing.bib", fg="red") in result.output
+    assert "Configured input does not exist for" in result.output
 
 
 @pytest.mark.parametrize("failure", ["absent", "unreadable", "symlink", "escape"])
