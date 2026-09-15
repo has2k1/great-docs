@@ -716,20 +716,33 @@ cli.add_command(config)
 cli.add_command(ci)
 
 
+def _count_phrase(count: int, singular: str, plural: str) -> str:
+    """Render a count with the correct singular or plural noun phrase"""
+    return f"{count} {singular if count == 1 else plural}"
+
+
 def _print_migration(migration: Migration) -> None:
     """Show every proposed move, file edit, needs-review item, and blocker"""
     import difflib
 
     root = migration.package_root
     if migration.moves:
-        click.echo(click.style(f"Moves ({len(migration.moves)})", bold=True))
+        click.echo(
+            click.style(
+                _count_phrase(len(migration.moves), "Item to Move", "Items to Move"), bold=True
+            )
+        )
         for move in migration.moves:
             source = move.source.relative_to(root)
             destination = move.destination.relative_to(root)
             click.echo(f"  {source} {click.style('->', dim=True)} {destination}")
         click.echo()
     if migration.edits:
-        click.echo(click.style(f"Edits ({len(migration.edits)})", bold=True))
+        click.echo(
+            click.style(
+                _count_phrase(len(migration.edits), "File to Edit", "Files to Edit"), bold=True
+            )
+        )
         for edit in migration.edits:
             path = str(edit.path.relative_to(root))
             click.echo(f"  {'Create' if edit.before is None else 'Update'} {path}")
@@ -753,17 +766,28 @@ def _print_migration(migration: Migration) -> None:
                     else:
                         click.echo(line)
         click.echo()
-    _print_notes("Needs review", migration.follow_up, "yellow", root=root)
-    _print_notes("Blocked", migration.blockers, "red", root=root, err=True)
+    _print_notes(
+        _count_phrase(len(migration.follow_up), "Item Requiring Review", "Items Requiring Review"),
+        migration.follow_up,
+        "yellow",
+        root=root,
+    )
+    _print_notes(
+        _count_phrase(len(migration.blockers), "Blocking Problem", "Blocking Problems"),
+        migration.blockers,
+        "red",
+        root=root,
+        err=True,
+    )
 
 
 def _print_notes(
     label: str, notes: "tuple[Note, ...]", color: str, *, root: Path, err: bool = False
 ) -> None:
-    """Print a count-headed, category-grouped section of migration notes"""
+    """Print a category-grouped section of migration notes under a pre-formatted count header"""
     if not notes:
         return
-    click.echo(click.style(f"{label} ({len(notes)})", bold=True, fg=color), err=err)
+    click.echo(click.style(label, bold=True, fg=color), err=err)
     categories: dict[str, list[Note]] = {}
     for note in notes:
         categories.setdefault(note.category, []).append(note)
