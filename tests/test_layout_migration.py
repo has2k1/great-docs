@@ -176,7 +176,7 @@ def test_dry_run_report_groups_review_items_by_category(project: Path) -> None:
     )
     assert result.exit_code == 0, result.output
     assert "1 Item Requiring Review" in result.output
-    assert "Unsupported File Types to Check (1)" in result.output
+    assert "reStructuredText Files to Check (1)" in result.output
     assert str(project / "essays/notes.rst") in result.output
 
 
@@ -1132,6 +1132,17 @@ def test_recursive_terminal_recordings_have_file_specific_follow_up(project: Pat
     assert companion in dict(result.fingerprints)
 
 
+def test_termshow_inside_a_moved_directory_gets_one_note_not_two(project: Path) -> None:
+    put(project, "great-docs.yml", "sections: [{dir: essays}]\n")
+    recording = put(project, "essays/demo.termshow", "Recording")
+    put(project, "essays/demo.yml", "command: echo demo")
+    put(project, "essays/one.md", "# One\n")
+    result = analyse(Layout.make(project), Path("docs"))
+    matches = [n for n in result.follow_up if str(recording) in n]
+    assert len(matches) == 1
+    assert matches[0].category == "Terminal Recordings to Check"
+
+
 def test_gitignored_fixture_tree_is_not_reviewed(
     project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1240,8 +1251,8 @@ def test_move_contents_flag_package_metadata_and_dynamic_files(project: Path) ->
     assert directory.category == "Package Files Mixed Into Docs"
     dynamic = next(n for n in result.follow_up if "notebook references" in n.lower())
     assert dynamic.category == "Dynamic Code to Verify"
-    unsupported = next(n for n in result.follow_up if "companion-file references" in n.lower())
-    assert unsupported.category == "Unsupported File Types to Check"
+    unsupported = next(n for n in result.follow_up if "restructuredtext references" in n.lower())
+    assert unsupported.category == "reStructuredText Files to Check"
 
 
 def test_inspection_errors_are_categorized(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
