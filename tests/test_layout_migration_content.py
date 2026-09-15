@@ -144,7 +144,7 @@ def test_include_reference_inside_fenced_example_is_not_a_blocker(tmp_path: Path
     _, _, follow_up, blockers = rewrite_document(
         text, tmp_path / "index.qmd", (Move(tmp_path / "index.qmd", tmp_path / "docs/index.qmd"),)
     )
-    assert any("shortcode" in message.lower() for message in follow_up)
+    assert not follow_up
     assert not blockers
 
 
@@ -384,6 +384,21 @@ def test_unsupported_html_reference_note_has_a_category_and_excerpt(tmp_path: Pa
     assert "srcset" in note.snippet
 
 
+def test_plain_style_attribute_is_not_flagged(tmp_path: Path) -> None:
+    page = tmp_path / "index.qmd"
+    text = 'before\n<div style="color: red; font-weight: bold;">text</div>\n'
+    _, _, follow_up, _ = rewrite_document(text, page, (Move(page, tmp_path / "docs/index.qmd"),))
+    assert not any(n.category == "HTML Attributes to Rebase Manually" for n in follow_up)
+
+
+def test_style_with_url_is_flagged(tmp_path: Path) -> None:
+    page = tmp_path / "index.qmd"
+    text = 'before\n<div style="background: url(bg.png);">text</div>\n'
+    _, _, follow_up, _ = rewrite_document(text, page, (Move(page, tmp_path / "docs/index.qmd"),))
+    note = next(n for n in follow_up if n.category == "HTML Attributes to Rebase Manually")
+    assert "url(bg.png)" in note.snippet
+
+
 def test_dynamic_code_note_has_a_category_and_excerpt(tmp_path: Path) -> None:
     page = tmp_path / "index.qmd"
     text = 'text\n```{python}\nopen("x")\n```\n'
@@ -397,11 +412,26 @@ def test_dynamic_code_note_has_a_category_and_excerpt(tmp_path: Path) -> None:
 
 def test_shortcode_note_has_a_category_and_first_occurrence_excerpt(tmp_path: Path) -> None:
     page = tmp_path / "index.qmd"
-    text = "intro\n{{< include extra.qmd >}}\n"
+    text = "intro\n{{< video demo.mp4 >}}\n"
     _, _, follow_up, _ = rewrite_document(text, page, (Move(page, tmp_path / "docs/index.qmd"),))
     note = next(n for n in follow_up if n.category == "Shortcodes to Check")
     assert note.line == 2
-    assert note.snippet == "{{< include extra.qmd >}}"
+    assert note.snippet == "{{< video demo.mp4 >}}"
+
+
+def test_non_file_shortcode_is_not_flagged(tmp_path: Path) -> None:
+    page = tmp_path / "index.qmd"
+    text = "intro\n{{< meta title >}}\n{{< kbd Ctrl-C >}}\n{{< pagebreak >}}\n"
+    _, _, follow_up, _ = rewrite_document(text, page, (Move(page, tmp_path / "docs/index.qmd"),))
+    assert not any(n.category == "Shortcodes to Check" for n in follow_up)
+
+
+def test_include_shortcode_alone_does_not_duplicate_into_generic_review(tmp_path: Path) -> None:
+    page = tmp_path / "index.qmd"
+    text = "intro\n{{< include extra.qmd >}}\n"
+    (page.parent / "extra.qmd").write_text("# Extra\n")
+    _, _, follow_up, _ = rewrite_document(text, page, (Move(page, tmp_path / "docs/index.qmd"),))
+    assert not any(n.category == "Shortcodes to Check" for n in follow_up)
 
 
 def test_include_reference_note_has_a_category_and_excerpt(tmp_path: Path) -> None:
