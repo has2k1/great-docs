@@ -840,7 +840,7 @@ def _print_notes(
                 click.echo(f"    {_subject(note, root)}", err=err)
             else:
                 click.echo(f"    {note}", err=err)
-    click.echo(err=err)
+        click.echo(err=err)
 
 
 @click.command(name="migrate-layout", hidden=True)
