@@ -402,7 +402,7 @@ def rewrite_document(
             follow_up.append(
                 Note(
                     f"Review dynamic reference in {source}: {value}",
-                    category="Dynamic Code to Verify",
+                    category="Dynamic References to Review",
                     path=source,
                     line=line,
                     snippet=snippet,
@@ -496,7 +496,7 @@ def rewrite_document(
             follow_up.append(
                 Note(
                     f"Review dynamic code and working-directory assumptions in {source}",
-                    category="Dynamic Code to Verify",
+                    category="Code Blocks to Verify",
                     path=source,
                     line=line,
                     snippet=snippet,

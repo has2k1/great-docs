@@ -717,8 +717,8 @@ cli.add_command(ci)
 
 
 def _count_phrase(count: int, singular: str, plural: str) -> str:
-    """Render a count with the correct singular or plural noun phrase"""
-    return f"{count} {singular if count == 1 else plural}"
+    """Render a noun phrase followed by its count in parentheses"""
+    return f"{singular if count == 1 else plural} ({count})"
 
 
 def _print_migration(migration: Migration) -> None:
@@ -767,7 +767,7 @@ def _print_migration(migration: Migration) -> None:
                         click.echo(line)
         click.echo()
     _print_notes(
-        _count_phrase(len(migration.follow_up), "Item Requiring Review", "Items Requiring Review"),
+        _count_phrase(len(migration.follow_up), "Item to Review", "Items to Review"),
         migration.follow_up,
         "yellow",
         root=root,
@@ -779,6 +779,39 @@ def _print_migration(migration: Migration) -> None:
         root=root,
         err=True,
     )
+
+
+# Categories backed by exactly one message template, where nothing but the
+# path (and any fixed trailing detail) varies between notes. Their category
+# name already reads as the shared action sentence, so items show only the
+# part that actually varies (see `_subject`) instead of repeating it.
+_SUBJECT_ONLY_CATEGORIES = frozenset(
+    {
+        "Scripts and Notebooks to Verify",
+        "reStructuredText Files to Check",
+        "Terminal Recordings to Check",
+        "Package Files Mixed Into Docs",
+        "Already Migrated",
+        "Relocation Not Supported",
+        "References Outside the Move",
+        "Assets With Unclear Ownership",
+        "Old Output Paths to Update",
+    }
+)
+
+# Categories whose notes carry a line and snippet, but where the snippet is
+# always some boilerplate variant (e.g. "```{python}") that adds nothing
+# beyond "there's a code block here" — show the location without it.
+_SNIPPET_SUPPRESSED_CATEGORIES = frozenset({"Code Blocks to Verify"})
+
+
+def _subject(note: "Note", root: Path) -> str:
+    """The relative path plus any fixed detail that followed it in the message"""
+    assert note.path is not None
+    path_text = str(note.path)
+    offset = note.rfind(path_text)
+    suffix = note[offset + len(path_text) :] if offset != -1 else ""
+    return os.path.relpath(note.path, root) + suffix
 
 
 def _print_notes(
@@ -796,8 +829,15 @@ def _print_notes(
         for note in items:
             if note.path is not None and note.line is not None and note.snippet is not None:
                 display_path = os.path.relpath(note.path, root)
-                location = click.style(f"{display_path}:{note.line}:", fg="cyan")
-                click.echo(f"    {location} {note.snippet}", err=err)
+                if category in _SNIPPET_SUPPRESSED_CATEGORIES:
+                    click.echo(
+                        f"    {click.style(f'{display_path}:{note.line}', fg='cyan')}", err=err
+                    )
+                else:
+                    location = click.style(f"{display_path}:{note.line}:", fg="cyan")
+                    click.echo(f"    {location} {note.snippet}", err=err)
+            elif note.path is not None and category in _SUBJECT_ONLY_CATEGORIES:
+                click.echo(f"    {_subject(note, root)}", err=err)
             else:
                 click.echo(f"    {note}", err=err)
     click.echo(err=err)

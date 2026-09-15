@@ -17,10 +17,10 @@ from great_docs.cli import cli
 
 
 def test_note_behaves_as_its_message_string() -> None:
-    note = Note("Review dynamic reference in a.qmd: b", category="Dynamic Code to Verify")
+    note = Note("Review dynamic reference in a.qmd: b", category="Dynamic References to Review")
     assert note == "Review dynamic reference in a.qmd: b"
     assert "dynamic reference" in note
-    assert note.category == "Dynamic Code to Verify"
+    assert note.category == "Dynamic References to Review"
     assert note.path is None
     assert note.line is None
     assert note.snippet is None
@@ -161,9 +161,9 @@ def test_dry_run_report_prints_move_count_header(project: Path) -> None:
         cli, ["migrate-layout", "--project-path", str(project), "--dry-run", "--yes"]
     )
     assert result.exit_code == 0, result.output
-    assert "1 Item to Move" in result.output
+    assert "Item to Move (1)" in result.output
     assert "great-docs.yml -> docs/great-docs.yml" in result.output
-    assert "Requiring Review" not in result.output
+    assert "to Review" not in result.output
     assert "Blocking Problem" not in result.output
 
 
@@ -175,9 +175,9 @@ def test_dry_run_report_groups_review_items_by_category(project: Path) -> None:
         cli, ["migrate-layout", "--project-path", str(project), "--dry-run", "--yes"]
     )
     assert result.exit_code == 0, result.output
-    assert "1 Item Requiring Review" in result.output
+    assert "Item to Review (1)" in result.output
     assert "reStructuredText Files to Check (1)" in result.output
-    assert str(project / "essays/notes.rst") in result.output
+    assert "essays/notes.rst" in result.output
 
 
 def test_dry_run_report_groups_blockers_by_category(project: Path) -> None:
@@ -198,7 +198,7 @@ def test_dry_run_report_groups_blockers_by_category(project: Path) -> None:
         ],
     )
     assert result.exit_code != 0
-    assert "1 Blocking Problem" in result.output
+    assert "Blocking Problem (1)" in result.output
     assert "Conflicts at the Destination (1)" in result.output
 
 
@@ -213,6 +213,41 @@ def test_dry_run_report_prints_a_located_excerpt(project: Path) -> None:
     assert "srcset" in result.output
 
 
+def test_dry_run_report_shows_bare_subject_for_single_template_categories(project: Path) -> None:
+    put(project, "great-docs.yml", "sections: [{dir: essays}]\n")
+    put(project, "essays/script.py", "print('demo')\n")
+    put(project, "essays/one.md", "# One\n")
+    result = CliRunner().invoke(
+        cli, ["migrate-layout", "--project-path", str(project), "--dry-run", "--yes"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "Scripts and Notebooks to Verify (1)" in result.output
+    assert "essays/script.py" in result.output
+    assert "Review dynamic code, notebook references" not in result.output
+
+
+def test_dry_run_report_suppresses_snippet_for_code_blocks(project: Path) -> None:
+    put(project, "index.qmd", 'text\n```{python}\nopen("x")\n```\n')
+    result = CliRunner().invoke(
+        cli, ["migrate-layout", "--project-path", str(project), "--dry-run", "--yes"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "Code Blocks to Verify (1)" in result.output
+    assert "index.qmd:2" in result.output
+    assert "```{python}" not in result.output
+
+
+def test_dry_run_report_keeps_trailing_detail_for_old_output_paths(project: Path) -> None:
+    put(project, "Makefile", "publish:\n\trsync -a great-docs/_site/ remote:/var/www\n")
+    result = CliRunner().invoke(
+        cli, ["migrate-layout", "--project-path", str(project), "--dry-run", "--yes"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "Old Output Paths to Update (1)" in result.output
+    assert "Makefile; publish " in result.output
+    assert str(project / "docs/_site") in result.output
+
+
 def test_dry_run_report_styles_section_headers_when_color_is_forced(project: Path) -> None:
     result = CliRunner().invoke(
         cli,
@@ -220,7 +255,7 @@ def test_dry_run_report_styles_section_headers_when_color_is_forced(project: Pat
         color=True,
     )
     assert result.exit_code == 0, result.output
-    assert click.style("1 Item to Move", bold=True) in result.output
+    assert click.style("Item to Move (1)", bold=True) in result.output
 
 
 @pytest.mark.parametrize("failure", ["absent", "unreadable", "symlink", "escape"])
@@ -262,7 +297,7 @@ def test_explicit_migrated_config_is_noop_unless_relocation_requested(project: P
     assert "no migration is needed" in result.output.lower()
     result = CliRunner().invoke(cli, [*args, "--to", "docs", "--yes"])
     assert result.exit_code != 0
-    assert "unsupported" in result.output.lower()
+    assert "relocation not supported" in result.output.lower()
     assert snapshot(project) == before
 
 
@@ -1250,7 +1285,7 @@ def test_move_contents_flag_package_metadata_and_dynamic_files(project: Path) ->
     directory = next(n for n in result.blockers if "package sources or metadata" in n.lower())
     assert directory.category == "Package Files Mixed Into Docs"
     dynamic = next(n for n in result.follow_up if "notebook references" in n.lower())
-    assert dynamic.category == "Dynamic Code to Verify"
+    assert dynamic.category == "Scripts and Notebooks to Verify"
     unsupported = next(n for n in result.follow_up if "restructuredtext references" in n.lower())
     assert unsupported.category == "reStructuredText Files to Check"
 
