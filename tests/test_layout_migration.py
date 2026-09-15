@@ -17,10 +17,10 @@ from great_docs.cli import cli
 
 
 def test_note_behaves_as_its_message_string() -> None:
-    note = Note("Review dynamic reference in a.qmd: b", category="Dynamic content")
+    note = Note("Review dynamic reference in a.qmd: b", category="Dynamic Code to Verify")
     assert note == "Review dynamic reference in a.qmd: b"
     assert "dynamic reference" in note
-    assert note.category == "Dynamic content"
+    assert note.category == "Dynamic Code to Verify"
     assert note.path is None
     assert note.line is None
     assert note.snippet is None
@@ -29,7 +29,11 @@ def test_note_behaves_as_its_message_string() -> None:
 def test_note_carries_location_metadata() -> None:
     path = Path("docs/index.qmd")
     note = Note(
-        "Review X", category="Unsupported HTML references", path=path, line=7, snippet="<img>"
+        "Review X",
+        category="HTML Attributes to Rebase Manually",
+        path=path,
+        line=7,
+        snippet="<img>",
     )
     assert note.path == path
     assert note.line == 7
@@ -49,7 +53,7 @@ def test_note_survives_copy_and_deepcopy() -> None:
 
     note = Note(
         "Review X in a.qmd",
-        category="Unsupported HTML references",
+        category="HTML Attributes to Rebase Manually",
         path=Path("a.qmd"),
         line=3,
         snippet="<img>",
@@ -58,7 +62,7 @@ def test_note_survives_copy_and_deepcopy() -> None:
     deep = copy.deepcopy(note)
     for copied in (shallow, deep):
         assert copied == note
-        assert copied.category == "Unsupported HTML references"
+        assert copied.category == "HTML Attributes to Rebase Manually"
         assert copied.path == Path("a.qmd")
         assert copied.line == 3
         assert copied.snippet == "<img>"
@@ -157,10 +161,10 @@ def test_dry_run_report_prints_move_count_header(project: Path) -> None:
         cli, ["migrate-layout", "--project-path", str(project), "--dry-run", "--yes"]
     )
     assert result.exit_code == 0, result.output
-    assert "Moves (1)" in result.output
+    assert "1 Item to Move" in result.output
     assert "great-docs.yml -> docs/great-docs.yml" in result.output
-    assert "Needs review" not in result.output
-    assert "Blocked" not in result.output
+    assert "Requiring Review" not in result.output
+    assert "Blocking Problem" not in result.output
 
 
 def test_dry_run_report_groups_review_items_by_category(project: Path) -> None:
@@ -171,8 +175,8 @@ def test_dry_run_report_groups_review_items_by_category(project: Path) -> None:
         cli, ["migrate-layout", "--project-path", str(project), "--dry-run", "--yes"]
     )
     assert result.exit_code == 0, result.output
-    assert "Needs review (1)" in result.output
-    assert "Unsupported references (1)" in result.output
+    assert "1 Item Requiring Review" in result.output
+    assert "Unsupported File Types to Check (1)" in result.output
     assert str(project / "essays/notes.rst") in result.output
 
 
@@ -194,8 +198,8 @@ def test_dry_run_report_groups_blockers_by_category(project: Path) -> None:
         ],
     )
     assert result.exit_code != 0
-    assert "Blocked (1)" in result.output
-    assert "Destination conflicts (1)" in result.output
+    assert "1 Blocking Problem" in result.output
+    assert "Conflicts at the Destination (1)" in result.output
 
 
 def test_dry_run_report_prints_a_located_excerpt(project: Path) -> None:
@@ -216,7 +220,7 @@ def test_dry_run_report_styles_section_headers_when_color_is_forced(project: Pat
         color=True,
     )
     assert result.exit_code == 0, result.output
-    assert click.style("Moves (1)", bold=True) in result.output
+    assert click.style("1 Item to Move", bold=True) in result.output
 
 
 @pytest.mark.parametrize("failure", ["absent", "unreadable", "symlink", "escape"])
@@ -501,7 +505,7 @@ def test_asset_directory_referenced_externally_stays_protected(project: Path) ->
     note = next(
         n for n in result.follow_up if "external reference" in n.lower() and "assets/chart.png" in n
     )
-    assert note.category == "External references"
+    assert note.category == "References Outside the Move"
 
 
 def test_directory_referenced_only_from_config_path_folds_in(project: Path) -> None:
@@ -1233,11 +1237,11 @@ def test_move_contents_flag_package_metadata_and_dynamic_files(project: Path) ->
     put(project, "essays/one.md", "# One\n")
     result = analyse(Layout.make(project), Path("docs"))
     directory = next(n for n in result.blockers if "package sources or metadata" in n.lower())
-    assert directory.category == "Directory conflicts"
+    assert directory.category == "Package Files Mixed Into Docs"
     dynamic = next(n for n in result.follow_up if "notebook references" in n.lower())
-    assert dynamic.category == "Dynamic content"
+    assert dynamic.category == "Dynamic Code to Verify"
     unsupported = next(n for n in result.follow_up if "companion-file references" in n.lower())
-    assert unsupported.category == "Unsupported references"
+    assert unsupported.category == "Unsupported File Types to Check"
 
 
 def test_inspection_errors_are_categorized(project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1253,7 +1257,7 @@ def test_inspection_errors_are_categorized(project: Path, monkeypatch: pytest.Mo
     monkeypatch.setattr(Path, "read_bytes", unreadable)
     result = analyse(Layout.make(project), Path("docs"))
     error = next(n for n in result.blockers if "cannot inspect" in n.lower() and "refs.bib" in n)
-    assert error.category == "I/O errors"
+    assert error.category == "Files That Could Not Be Read"
 
 
 def test_repeat_migration_reports_a_status_note(project: Path) -> None:
@@ -1262,7 +1266,7 @@ def test_repeat_migration_reports_a_status_note(project: Path) -> None:
     apply(analyse(Layout.make(project), Path("docs")))
     result = analyse(Layout.make(project), Path("docs"))
     note = next(n for n in result.follow_up if "no migration is needed" in n.lower())
-    assert note.category == "Status"
+    assert note.category == "Already Migrated"
 
 
 def test_relocating_migrated_project_is_blocked_with_category(project: Path) -> None:
@@ -1271,59 +1275,59 @@ def test_relocating_migrated_project_is_blocked_with_category(project: Path) -> 
     apply(analyse(Layout.make(project), Path("docs")))
     result = analyse(Layout.make(project), Path("website"))
     note = next(n for n in result.blockers if "unsupported" in n.lower())
-    assert note.category == "Unsupported migration"
+    assert note.category == "Relocation Not Supported"
 
 
 def test_destination_must_be_a_descendant_is_categorized(project: Path) -> None:
     result = analyse(Layout.make(project), Path("."))
     note = next(n for n in result.blockers if "must be a descendant" in n.lower())
-    assert note.category == "Destination conflicts"
+    assert note.category == "Conflicts at the Destination"
 
 
 def test_missing_documentation_source_is_categorized(project: Path) -> None:
     put(project, "great-docs.yml", "sections: [{dir: essays}]\n")
     result = analyse(Layout.make(project), Path("docs"))
     note = next(n for n in result.blockers if "does not exist" in n.lower() and "essays" in n)
-    assert note.category == "Source conflicts"
+    assert note.category == "Conflicts With the Source"
 
 
 def test_missing_configured_input_is_categorized(project: Path) -> None:
     put(project, "great-docs.yml", "bibliography: missing.bib\n")
     result = analyse(Layout.make(project), Path("docs"))
     note = next(n for n in result.blockers if "configured input does not exist" in n.lower())
-    assert note.category == "Configuration"
+    assert note.category == "Configuration to Review"
 
 
 def test_implicit_skill_discovery_is_retained_with_category(project: Path) -> None:
     put(project, "skills/sample/SKILL.md", "# Demo\n")
     result = analyse(Layout.make(project), Path("docs"))
     note = next(n for n in result.follow_up if "skill discovery" in n.lower())
-    assert note.category == "Retained files"
+    assert note.category == "Files Staying in Place"
 
 
 def test_unreferenced_asset_is_categorized(project: Path) -> None:
     put(project, "assets/orphan.png", b"\x00")
     result = analyse(Layout.make(project), Path("docs"))
     note = next(n for n in result.blockers if "unreferenced implicit asset" in n.lower())
-    assert note.category == "Asset conflicts"
+    assert note.category == "Assets With Unclear Ownership"
 
 
 def test_freeze_cache_conflict_is_categorized(project: Path) -> None:
     put(project, "docs/_freeze/.gitkeep", "")
     result = analyse(Layout.make(project), Path("docs"))
     note = next(n for n in result.blockers if "destination cache already exists" in n.lower())
-    assert note.category == "Freeze cache conflicts"
+    assert note.category == "Cached Build Conflicts"
 
 
 def test_terminal_recording_is_categorized(project: Path) -> None:
     put(project, "user_guide/demo.termshow", "")
     result = analyse(Layout.make(project), Path("docs"))
     note = next(n for n in result.follow_up if "terminal recording" in n.lower())
-    assert note.category == "Terminal recordings"
+    assert note.category == "Terminal Recordings to Check"
 
 
 def test_automation_output_path_is_categorized(project: Path) -> None:
     put(project, "Makefile", "publish:\n\trsync -a great-docs/_site/ remote:/var/www\n")
     result = analyse(Layout.make(project), Path("docs"))
     note = next(n for n in result.follow_up if "update old output paths" in n.lower())
-    assert note.category == "Output paths"
+    assert note.category == "Old Output Paths to Update"

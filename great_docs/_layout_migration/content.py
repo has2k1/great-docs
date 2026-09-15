@@ -394,7 +394,7 @@ def rewrite_document(
             follow_up.append(
                 Note(
                     f"Review dynamic reference in {source}: {value}",
-                    category="Dynamic content",
+                    category="Dynamic Code to Verify",
                     path=source,
                     line=line,
                     snippet=snippet,
@@ -460,7 +460,7 @@ def rewrite_document(
             blockers.append(
                 Note(
                     str(error),
-                    category="Broken references",
+                    category="Broken References to Fix",
                     path=source,
                     line=line,
                     snippet=snippet,
@@ -488,7 +488,7 @@ def rewrite_document(
             follow_up.append(
                 Note(
                     f"Review dynamic code and working-directory assumptions in {source}",
-                    category="Dynamic content",
+                    category="Dynamic Code to Verify",
                     path=source,
                     line=line,
                     snippet=snippet,
@@ -499,7 +499,7 @@ def rewrite_document(
             follow_up.append(
                 Note(
                     f"Review Quarto shortcode inputs in {source}",
-                    category="Shortcode inputs",
+                    category="Shortcodes to Check",
                     path=source,
                     line=line,
                     snippet=snippet,
@@ -523,7 +523,7 @@ def rewrite_document(
                     blockers.append(
                         Note(
                             f"Cannot preserve include reference in {source}: {reference}",
-                            category="Include references",
+                            category="Includes That Can't Be Rebased",
                             path=source,
                             line=line,
                             snippet=snippet,
@@ -538,7 +538,7 @@ def rewrite_document(
                     blockers.append(
                         Note(
                             f"Cannot preserve include reference in {source}: {reference}",
-                            category="Include references",
+                            category="Includes That Can't Be Rebased",
                             path=source,
                             line=line,
                             snippet=snippet,
@@ -554,7 +554,7 @@ def rewrite_document(
             follow_up.append(
                 Note(
                     f"Review unsupported HTML file references in {source}",
-                    category="Unsupported HTML references",
+                    category="HTML Attributes to Rebase Manually",
                     path=source,
                     line=line,
                     snippet=snippet,
@@ -571,7 +571,7 @@ def rewrite_document(
                 blockers.append(
                     Note(
                         f"Review and explicitly rebase frontmatter file references in {source}",
-                        category="Frontmatter references",
+                        category="Frontmatter Fields to Rebase Manually",
                         path=source,
                         line=line,
                         snippet=snippet,
