@@ -25,7 +25,7 @@ class Note(str):
         cls,
         message: str,
         *,
-        category: str,
+        category: str = "",
         path: Path | None = None,
         line: int | None = None,
         snippet: str | None = None,
