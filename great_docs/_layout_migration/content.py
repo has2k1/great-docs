@@ -542,7 +542,7 @@ def rewrite_document(
                     blockers.append(
                         Note(
                             f"Cannot preserve include reference in {source}: {reference}",
-                            category="Includes That Can't Be Rebased",
+                            category="Includes That Can't Be Auto-Updated",
                             path=source,
                             line=line,
                             snippet=snippet,
@@ -557,7 +557,7 @@ def rewrite_document(
                     blockers.append(
                         Note(
                             f"Cannot preserve include reference in {source}: {reference}",
-                            category="Includes That Can't Be Rebased",
+                            category="Includes That Can't Be Auto-Updated",
                             path=source,
                             line=line,
                             snippet=snippet,
@@ -575,7 +575,7 @@ def rewrite_document(
             follow_up.append(
                 Note(
                     f"Review unsupported HTML file references in {source}",
-                    category="HTML Attributes to Rebase Manually",
+                    category="HTML Attributes to Update Manually",
                     path=source,
                     line=line,
                     snippet=snippet,
@@ -591,8 +591,8 @@ def rewrite_document(
                 line, snippet = _locate(text, frontmatter.start(1) + field_match.start())
                 blockers.append(
                     Note(
-                        f"Review and explicitly rebase frontmatter file references in {source}",
-                        category="Frontmatter Fields to Rebase Manually",
+                        f"Review and manually update frontmatter file references in {source}",
+                        category="Frontmatter Fields to Update Manually",
                         path=source,
                         line=line,
                         snippet=snippet,

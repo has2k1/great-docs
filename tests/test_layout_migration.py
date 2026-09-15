@@ -30,7 +30,7 @@ def test_note_carries_location_metadata() -> None:
     path = Path("docs/index.qmd")
     note = Note(
         "Review X",
-        category="HTML Attributes to Rebase Manually",
+        category="HTML Attributes to Update Manually",
         path=path,
         line=7,
         snippet="<img>",
@@ -53,7 +53,7 @@ def test_note_survives_copy_and_deepcopy() -> None:
 
     note = Note(
         "Review X in a.qmd",
-        category="HTML Attributes to Rebase Manually",
+        category="HTML Attributes to Update Manually",
         path=Path("a.qmd"),
         line=3,
         snippet="<img>",
@@ -62,7 +62,7 @@ def test_note_survives_copy_and_deepcopy() -> None:
     deep = copy.deepcopy(note)
     for copied in (shallow, deep):
         assert copied == note
-        assert copied.category == "HTML Attributes to Rebase Manually"
+        assert copied.category == "HTML Attributes to Update Manually"
         assert copied.path == Path("a.qmd")
         assert copied.line == 3
         assert copied.snippet == "<img>"
