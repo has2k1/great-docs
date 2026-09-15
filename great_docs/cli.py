@@ -15,7 +15,7 @@ from ._subprocess import TEXT_MODE_KWARGS
 from .core import GreatDocs
 
 if TYPE_CHECKING:
-    from ._layout_migration import Migration
+    from ._layout_migration import Migration, Note
 
 
 def _config_option(function: Callable[..., Any]) -> Callable[..., Any]:
@@ -717,29 +717,61 @@ cli.add_command(ci)
 
 
 def _print_migration(migration: Migration) -> None:
-    """Show every proposed move, file edit, and manual follow-up"""
+    """Show every proposed move, file edit, needs-review item, and blocker"""
     import difflib
 
     root = migration.package_root
-    for move in migration.moves:
-        click.echo(f"Move {move.source.relative_to(root)} to {move.destination.relative_to(root)}")
-    for edit in migration.edits:
-        path = str(edit.path.relative_to(root))
-        click.echo(f"{'Create' if edit.before is None else 'Update'} {path}")
-        try:
-            before = (edit.before or b"").decode("utf-8")
-            after = edit.after.decode("utf-8")
-        except UnicodeError:
-            click.echo(f"  Write {len(edit.after)} bytes; preserve the original for recovery.")
-        else:
-            for line in difflib.unified_diff(
-                before.splitlines(), after.splitlines(), fromfile=path, tofile=path, lineterm=""
-            ):
-                click.echo(line)
-    for item in migration.follow_up:
-        click.echo(item)
-    for blocker in migration.blockers:
-        click.echo(f"Blocked: {blocker}", err=True)
+    if migration.moves:
+        click.echo(click.style(f"Moves ({len(migration.moves)})", bold=True))
+        for move in migration.moves:
+            source = move.source.relative_to(root)
+            destination = move.destination.relative_to(root)
+            click.echo(f"  {source} {click.style('->', dim=True)} {destination}")
+        click.echo()
+    if migration.edits:
+        click.echo(click.style(f"Edits ({len(migration.edits)})", bold=True))
+        for edit in migration.edits:
+            path = str(edit.path.relative_to(root))
+            click.echo(f"  {'Create' if edit.before is None else 'Update'} {path}")
+            try:
+                before = (edit.before or b"").decode("utf-8")
+                after = edit.after.decode("utf-8")
+            except UnicodeError:
+                click.echo(f"    Write {len(edit.after)} bytes; preserve the original for recovery.")
+            else:
+                for line in difflib.unified_diff(
+                    before.splitlines(), after.splitlines(), fromfile=path, tofile=path, lineterm=""
+                ):
+                    if line.startswith("+++") or line.startswith("---"):
+                        click.echo(line)
+                    elif line.startswith("+"):
+                        click.echo(click.style(line, fg="green"))
+                    elif line.startswith("-"):
+                        click.echo(click.style(line, fg="red"))
+                    else:
+                        click.echo(line)
+        click.echo()
+    _print_notes("Needs review", migration.follow_up, "yellow")
+    _print_notes("Blocked", migration.blockers, "red", err=True)
+
+
+def _print_notes(label: str, notes: "tuple[Note, ...]", color: str, *, err: bool = False) -> None:
+    """Print a count-headed, category-grouped section of migration notes"""
+    if not notes:
+        return
+    click.echo(click.style(f"{label} ({len(notes)})", bold=True, fg=color), err=err)
+    categories: dict[str, list[Note]] = {}
+    for note in notes:
+        categories.setdefault(note.category, []).append(note)
+    for category, items in categories.items():
+        click.echo(click.style(f"  {category} ({len(items)})", bold=True), err=err)
+        for note in items:
+            if note.line is not None and note.snippet is not None:
+                location = click.style(f"{note.path}:{note.line}:", fg="cyan")
+                click.echo(f"    {location} {note.snippet}", err=err)
+            else:
+                click.echo(f"    {note}", err=err)
+    click.echo(err=err)
 
 
 @click.command(name="migrate-layout", hidden=True)
