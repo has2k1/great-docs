@@ -815,7 +815,6 @@ _SUBJECT_ONLY_CATEGORIES = frozenset(
         "Assets With Unclear Ownership",
         "Old Output Paths to Update",
         "References to Edit Before Migrating",
-        "Skill Discovery to Verify",
     }
 )
 

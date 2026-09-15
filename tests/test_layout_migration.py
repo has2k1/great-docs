@@ -248,7 +248,7 @@ def test_dry_run_report_keeps_trailing_detail_for_old_output_paths(project: Path
     assert str(project / "docs/_site") in result.output
 
 
-def test_dry_run_report_shows_bare_path_for_skill_discovery(project: Path) -> None:
+def test_dry_run_report_explains_why_the_skill_file_needs_checking(project: Path) -> None:
     put(project, "skills/sample/SKILL.md", "# Demo\n")
     result = CliRunner().invoke(
         cli, ["migrate-layout", "--project-path", str(project), "--dry-run", "--yes"]
@@ -256,7 +256,8 @@ def test_dry_run_report_shows_bare_path_for_skill_discovery(project: Path) -> No
     assert result.exit_code == 0, result.output
     assert "Skill Discovery to Verify (1)" in result.output
     assert "skills/sample/SKILL.md" in result.output
-    assert "Review implicit skill discovery" not in result.output
+    assert "stays in place" in result.output
+    assert "hardcoded paths like docs/..." in result.output
 
 
 def test_dry_run_report_keeps_the_reason_for_files_retained_as_is(project: Path) -> None:
@@ -1395,8 +1396,9 @@ def test_missing_configured_input_is_categorized(project: Path) -> None:
 def test_implicit_skill_discovery_is_retained_with_category(project: Path) -> None:
     put(project, "skills/sample/SKILL.md", "# Demo\n")
     result = analyse(Layout.make(project), Path("docs"))
-    note = next(n for n in result.follow_up if "skill discovery" in n.lower())
-    assert note.category == "Skill Discovery to Verify"
+    note = next(n for n in result.follow_up if n.category == "Skill Discovery to Verify")
+    assert "stays in place" in note
+    assert "hardcoded paths like docs/..." in note
 
 
 def test_unreferenced_asset_is_categorized(project: Path) -> None:
