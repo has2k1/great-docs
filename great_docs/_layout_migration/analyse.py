@@ -528,7 +528,7 @@ def _fold_in_static_directories(
                 follow_up.append(
                     Note(
                         f"Retain {candidate} in place; something outside the moving documentation still references it",
-                        category="Files Staying in Place",
+                        category="Files Retained As-Is",
                         path=candidate,
                     )
                 )
@@ -882,7 +882,7 @@ def analyse(layout: Layout, destination: Path) -> Migration:
                 follow_up.append(
                     Note(
                         f"Retain external input for {'.'.join(map(str, option))}: {source}",
-                        category="Files Staying in Place",
+                        category="Files Retained As-Is",
                         path=source,
                     )
                 )
@@ -979,7 +979,7 @@ def analyse(layout: Layout, destination: Path) -> Migration:
                     blockers.append(
                         Note(
                             f"A retained external document needs reference edits before migration: {path}",
-                            category="Files Staying in Place",
+                            category="References to Edit Before Migrating",
                             path=path,
                         )
                     )
@@ -1093,7 +1093,7 @@ def analyse(layout: Layout, destination: Path) -> Migration:
         follow_up.append(
             Note(
                 f"Retain generated project {build}; the next build publishes to {destination / '_site'}",
-                category="Files Staying in Place",
+                category="Files Retained As-Is",
                 path=build,
             )
         )
@@ -1196,7 +1196,7 @@ def analyse(layout: Layout, destination: Path) -> Migration:
         follow_up.append(
             Note(
                 f"Review implicit skill discovery for retained input {skill}",
-                category="Files Staying in Place",
+                category="Skill Discovery to Verify",
                 path=skill,
             )
         )
