@@ -248,16 +248,13 @@ def test_dry_run_report_keeps_trailing_detail_for_old_output_paths(project: Path
     assert str(project / "docs/_site") in result.output
 
 
-def test_dry_run_report_explains_why_the_skill_file_needs_checking(project: Path) -> None:
+def test_dry_run_report_does_not_flag_a_curated_skill_file(project: Path) -> None:
     put(project, "skills/sample/SKILL.md", "# Demo\n")
     result = CliRunner().invoke(
         cli, ["migrate-layout", "--project-path", str(project), "--dry-run", "--yes"]
     )
     assert result.exit_code == 0, result.output
-    assert "Skill Discovery to Verify (1)" in result.output
-    assert "skills/sample/SKILL.md" in result.output
-    assert "stays in place" in result.output
-    assert "hardcoded paths like docs/..." in result.output
+    assert "skill" not in result.output.lower()
 
 
 def test_dry_run_report_keeps_the_reason_for_files_retained_as_is(project: Path) -> None:
@@ -284,14 +281,14 @@ def test_dry_run_report_styles_section_headers_when_color_is_forced(project: Pat
 
 
 def test_dry_run_report_styles_review_paths_red_when_color_is_forced(project: Path) -> None:
-    put(project, "skills/sample/SKILL.md", "# Demo\n")
+    put(project, "user_guide/demo.termshow", "")
     result = CliRunner().invoke(
         cli,
         ["migrate-layout", "--project-path", str(project), "--dry-run", "--yes"],
         color=True,
     )
     assert result.exit_code == 0, result.output
-    assert click.style("skills/sample/SKILL.md", fg="red") in result.output
+    assert click.style("user_guide/demo.termshow", fg="red") in result.output
 
 
 def test_dry_run_report_highlights_the_path_within_a_mixed_category(project: Path) -> None:
@@ -1393,12 +1390,11 @@ def test_missing_configured_input_is_categorized(project: Path) -> None:
     assert note.category == "Configuration to Review"
 
 
-def test_implicit_skill_discovery_is_retained_with_category(project: Path) -> None:
-    put(project, "skills/sample/SKILL.md", "# Demo\n")
+def test_curated_skill_file_is_fingerprinted_without_a_review_note(project: Path) -> None:
+    skill = put(project, "skills/sample/SKILL.md", "# Demo\n")
     result = analyse(Layout.make(project), Path("docs"))
-    note = next(n for n in result.follow_up if n.category == "Skill Discovery to Verify")
-    assert "stays in place" in note
-    assert "hardcoded paths like docs/..." in note
+    assert skill in dict(result.fingerprints)
+    assert not any("skill" in n.lower() for n in result.follow_up)
 
 
 def test_unreferenced_asset_is_categorized(project: Path) -> None:

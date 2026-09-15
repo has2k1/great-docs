@@ -1193,14 +1193,6 @@ def analyse(layout: Layout, destination: Path) -> Migration:
     skill = root / "skills" / package / "SKILL.md"
     if package and skill.is_file():
         retain(skill)
-        follow_up.append(
-            Note(
-                f"{skill} stays in place. If you migrated to a custom destination, check it "
-                "for hardcoded paths like docs/... that assume the default layout",
-                category="Skill Discovery to Verify",
-                path=skill,
-            )
-        )
     sources = (
         config.get("interlinks", {}).get("sources", {})
         if isinstance(config.get("interlinks"), dict)
