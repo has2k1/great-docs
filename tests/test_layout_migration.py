@@ -4,6 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import click
 import pytest
 from click.testing import CliRunner
 from yaml12 import read_yaml
@@ -127,6 +128,73 @@ def test_migration_command_reports_conflicts_even_with_yes(project: Path) -> Non
     assert result.exit_code != 0
     assert "already exists" in result.output.lower()
     assert snapshot(project) == before
+
+
+def test_dry_run_report_prints_move_count_header(project: Path) -> None:
+    result = CliRunner().invoke(
+        cli, ["migrate-layout", "--project-path", str(project), "--dry-run", "--yes"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "Moves (1)" in result.output
+    assert "great-docs.yml -> docs/great-docs.yml" in result.output
+    assert "Needs review" not in result.output
+    assert "Blocked" not in result.output
+
+
+def test_dry_run_report_groups_review_items_by_category(project: Path) -> None:
+    put(project, "great-docs.yml", "sections: [{dir: essays}]\n")
+    put(project, "essays/notes.rst", "Notes\n")
+    put(project, "essays/one.md", "# One\n")
+    result = CliRunner().invoke(
+        cli, ["migrate-layout", "--project-path", str(project), "--dry-run", "--yes"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "Needs review (1)" in result.output
+    assert "Unsupported references (1)" in result.output
+    assert str(project / "essays/notes.rst") in result.output
+
+
+def test_dry_run_report_groups_blockers_by_category(project: Path) -> None:
+    # Both a root and a `docs/` config now exist; `--config` disambiguates them,
+    # matching `test_migration_command_reports_conflicts_even_with_yes`, so the
+    # run reaches the blocked-report path instead of the config-selection error.
+    put(project, "docs/great-docs.yml", "display_name: Occupied\n")
+    result = CliRunner().invoke(
+        cli,
+        [
+            "migrate-layout",
+            "--project-path",
+            str(project),
+            "--config",
+            str(project / "great-docs.yml"),
+            "--dry-run",
+            "--yes",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "Blocked (1)" in result.output
+    assert "Destination conflicts (1)" in result.output
+
+
+def test_dry_run_report_prints_a_located_excerpt(project: Path) -> None:
+    put(project, "a.png", b"\x89PNG")
+    put(project, "index.qmd", 'before\n<img src="a.png" srcset="a.png 1x, b.png 2x">\n')
+    result = CliRunner().invoke(
+        cli, ["migrate-layout", "--project-path", str(project), "--dry-run", "--yes"]
+    )
+    assert result.exit_code == 0, result.output
+    assert f"{project / 'index.qmd'}:2:" in result.output
+    assert "srcset" in result.output
+
+
+def test_dry_run_report_styles_section_headers_when_color_is_forced(project: Path) -> None:
+    result = CliRunner().invoke(
+        cli,
+        ["migrate-layout", "--project-path", str(project), "--dry-run", "--yes"],
+        color=True,
+    )
+    assert result.exit_code == 0, result.output
+    assert click.style("Moves (1)", bold=True) in result.output
 
 
 @pytest.mark.parametrize("failure", ["absent", "unreadable", "symlink", "escape"])
