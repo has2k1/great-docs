@@ -380,7 +380,7 @@ def test_unsupported_html_reference_note_has_a_category_and_excerpt(tmp_path: Pa
     page = tmp_path / "index.qmd"
     text = 'before\n<img src="a.png" srcset="a.png 1x, b.png 2x">\n'
     _, _, follow_up, _ = rewrite_document(text, page, (Move(page, tmp_path / "docs/index.qmd"),))
-    note = next(n for n in follow_up if n.category == "HTML Attributes to Rebase Manually")
+    note = next(n for n in follow_up if n.category == "HTML Attributes to Update Manually")
     assert note.path == page
     assert note.line == 2
     assert "srcset" in note.snippet
@@ -390,14 +390,14 @@ def test_plain_style_attribute_is_not_flagged(tmp_path: Path) -> None:
     page = tmp_path / "index.qmd"
     text = 'before\n<div style="color: red; font-weight: bold;">text</div>\n'
     _, _, follow_up, _ = rewrite_document(text, page, (Move(page, tmp_path / "docs/index.qmd"),))
-    assert not any(n.category == "HTML Attributes to Rebase Manually" for n in follow_up)
+    assert not any(n.category == "HTML Attributes to Update Manually" for n in follow_up)
 
 
 def test_style_with_url_is_flagged(tmp_path: Path) -> None:
     page = tmp_path / "index.qmd"
     text = 'before\n<div style="background: url(bg.png);">text</div>\n'
     _, _, follow_up, _ = rewrite_document(text, page, (Move(page, tmp_path / "docs/index.qmd"),))
-    note = next(n for n in follow_up if n.category == "HTML Attributes to Rebase Manually")
+    note = next(n for n in follow_up if n.category == "HTML Attributes to Update Manually")
     assert "url(bg.png)" in note.snippet
 
 
@@ -439,7 +439,7 @@ def test_include_reference_note_has_a_category_and_excerpt(tmp_path: Path) -> No
     _, _, _, blockers = rewrite_document(
         text, tmp_path / "index.qmd", (Move(tmp_path / "index.qmd", tmp_path / "docs/index.qmd"),)
     )
-    note = next(n for n in blockers if n.category == "Includes That Can't Be Rebased")
+    note = next(n for n in blockers if n.category == "Includes That Can't Be Auto-Updated")
     assert note.line == 2
     assert note.snippet == "{{< include missing.qmd >}}"
 
@@ -448,7 +448,7 @@ def test_frontmatter_reference_note_has_a_category_and_excerpt(tmp_path: Path) -
     page = tmp_path / "index.qmd"
     text = "---\ntitle: Home\nimage: cover.png\n---\n# Home\n"
     _, _, _, blockers = rewrite_document(text, page, (Move(page, tmp_path / "docs/index.qmd"),))
-    note = next(n for n in blockers if n.category == "Frontmatter Fields to Rebase Manually")
+    note = next(n for n in blockers if n.category == "Frontmatter Fields to Update Manually")
     assert note.line == 3
     assert note.snippet == "image: cover.png"
 
