@@ -13675,12 +13675,18 @@ anchor-sections: true
 
     def _llms_txt_available(self) -> bool:
         """
-        Whether `llms.txt` and `llms-full.txt` will be generated for this project.
+        Predict whether the build will generate `llms.txt` and `llms-full.txt`
 
-        Both generators return early unless `_quarto.yml` carries an `api-reference`
-        block with a `package` and at least one section. Every place that links to
-        the files (the metadata margin, SKILL.md resources, the build log) should ask
-        this instead of assuming, so links and files cannot drift apart.
+        The homepage margin queries this before either file exists, so it must
+        predict whether the build will generate them.
+
+        Both files require `_quarto.yml` to contain an `api-reference` block
+        with an importable `package` and at least one section.
+
+        Returns
+        -------
+        bool
+            Whether the build should write both files.
         """
         quarto_yml = self.project_path / "_quarto.yml"
         if not quarto_yml.exists():
@@ -13688,12 +13694,23 @@ anchor-sections: true
         try:
             with open(quarto_yml, "r") as f:
                 config = read_yaml(f) or {}
-        except Exception:
+        except (OSError, ValueError):
+            return False
+        if not isinstance(config, dict):
             return False
         api_ref_config = config.get("api-reference")
         if not isinstance(api_ref_config, dict):
             return False
-        return bool(api_ref_config.get("package")) and bool(api_ref_config.get("sections"))
+        package_name = api_ref_config.get("package")
+        if not package_name or not api_ref_config.get("sections"):
+            return False
+        try:
+            import importlib
+
+            importlib.import_module(str(package_name).replace("-", "_"))
+        except ImportError:
+            return False
+        return True
 
     def _generate_llms_txt(self) -> None:
         """

@@ -13994,13 +13994,40 @@ def test_llms_txt_available_matches_generators():
         quarto = gd_dir / "_quarto.yml"
         quarto.write_text("project:\n  type: website\n", encoding="utf-8")
         assert docs._llms_txt_available() is False  # no api-reference
-        quarto.write_text("api-reference:\n  package: pkg\n  sections: []\n", encoding="utf-8")
+        quarto.write_text("api-reference:\n  package: os\n  sections: []\n", encoding="utf-8")
         assert docs._llms_txt_available() is False  # no sections
         quarto.write_text(
-            "api-reference:\n  package: pkg\n  sections:\n    - title: Core\n      contents: [pkg.f]\n",
+            "api-reference:\n  package: os\n  sections:\n    - title: Core\n      contents: [os.getcwd]\n",
             encoding="utf-8",
         )
         assert docs._llms_txt_available() is True
+
+
+def test_llms_txt_available_returns_false_for_non_dict_root():
+    """Return `False` for a list-valued `_quarto.yml` root"""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        gd_dir = Path(tmp_dir) / "great-docs"
+        gd_dir.mkdir()
+        (gd_dir / "_quarto.yml").write_text("- foo\n- bar\n", encoding="utf-8")
+        docs = GreatDocs(project_path=tmp_dir)
+        assert docs._llms_txt_available() is False
+
+
+def test_llms_txt_available_returns_false_when_package_cannot_be_imported():
+    """Return `False` when the configured package cannot be imported"""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        gd_dir = Path(tmp_dir) / "great-docs"
+        gd_dir.mkdir()
+        (gd_dir / "_quarto.yml").write_text(
+            "api-reference:\n"
+            "  package: totally_nonexistent_pkg_xyz\n"
+            "  sections:\n"
+            "    - title: Core\n"
+            "      contents: [totally_nonexistent_pkg_xyz.f]\n",
+            encoding="utf-8",
+        )
+        docs = GreatDocs(project_path=tmp_dir)
+        assert docs._llms_txt_available() is False
 
 
 def test_build_metadata_margin_authors_with_rich_metadata():
