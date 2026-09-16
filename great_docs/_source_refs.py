@@ -199,13 +199,59 @@ def fenced_code_spans(content: str) -> list[tuple[int, int]]:
     return spans
 
 
+def _raw_fence_delimiter_spans(content: str) -> list[tuple[int, int]]:
+    """
+    Locate delimiter lines for raw HTML fences
+
+    Raw HTML fence bodies remain visible because they contain rendered output,
+    but their delimiter lines are still syntax. Mask those lines before
+    scanning inline code so their backticks cannot form a span across the
+    fence.
+
+    Parameters
+    ----------
+    content
+        The Markdown source to scan.
+
+    Returns
+    -------
+    list[tuple[int, int]]
+        Character-offset spans for each raw fence's opening and closing
+        delimiter lines.
+    """
+    spans: list[tuple[int, int]] = []
+    offset = 0
+    fence = ""
+    raw = False
+    open_span = (0, 0)
+    for line in content.splitlines(keepends=True):
+        end = offset + len(line)
+        if fence:
+            stripped = line.strip()
+            if stripped and set(stripped) == {fence[0]} and len(stripped) >= len(fence):
+                if raw:
+                    spans.append(open_span)
+                    spans.append((offset, end))
+                fence = ""
+        else:
+            match = _FENCE.match(line.rstrip("\r\n"))
+            if match:
+                fence = match["fence"]
+                raw = match["info"].strip() in {"{=html}", "{html}"}
+                open_span = (offset, end)
+        offset = end
+    return spans
+
+
 def inline_code_spans(content: str) -> list[tuple[int, int]]:
     """
     Locate inline code spans outside fenced code blocks
 
     Mask fenced regions first, using `fenced_code_spans`, so a backtick
     that opens or closes a fence line is never mistaken for an inline
-    code delimiter.
+    code delimiter. Raw HTML fence delimiters are also masked while their
+    bodies remain visible, preventing their backticks from forming a false
+    inline-code span.
 
     Parameters
     ----------
@@ -218,7 +264,7 @@ def inline_code_spans(content: str) -> list[tuple[int, int]]:
         Character-offset spans covering each inline code span, backticks included.
     """
     masked = list(content)
-    for start, end in fenced_code_spans(content):
+    for start, end in fenced_code_spans(content) + _raw_fence_delimiter_spans(content):
         masked[start:end] = ["\n" if char == "\n" else " " for char in content[start:end]]
     visible = "".join(masked)
     return [match.span() for match in _INLINE_CODE.finditer(visible)]
