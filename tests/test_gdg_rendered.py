@@ -2057,10 +2057,11 @@ def test_logo_replaces_title():
     # Alt text should fall back to display_name
     assert navbar.get("logo-alt") == "Logo Test", "logo-alt should be the display_name"
 
-    # Favicon should be auto-generated from logo.svg and referenced in config
+    # Generate the favicon from logo.svg and reference it in the site config.
+    # Without cairosvg or native cairo, generation falls back to favicon.svg.
     favicon = cfg.get("website", {}).get("favicon")
-    assert favicon in ("favicon.ico", "logo.svg"), (
-        f"favicon should be favicon.ico or logo.svg, got {favicon}"
+    assert favicon in ("favicon.ico", "favicon.svg", "logo.svg"), (
+        f"Expected favicon.ico, favicon.svg, or logo.svg; got {favicon}"
     )
 
     # Logo files should exist in the build directory
@@ -2068,10 +2069,11 @@ def test_logo_replaces_title():
     assert (build_dir / "logo.svg").exists(), "logo.svg should be copied to build dir"
     assert (build_dir / "logo-dark.svg").exists(), "logo-dark.svg should be copied to build dir"
 
-    # Check for generated favicon files
+    # favicon.svg is always copied; raster variants require cairosvg.
+    assert (build_dir / "favicon.svg").exists(), "Expected favicon.svg"
+
     if favicon == "favicon.ico":
         assert (build_dir / "favicon.ico").exists(), "favicon.ico should exist"
-        assert (build_dir / "favicon.svg").exists(), "favicon.svg should exist"
         assert (build_dir / "favicon-32x32.png").exists(), "favicon-32x32.png should exist"
         assert (build_dir / "favicon-16x16.png").exists(), "favicon-16x16.png should exist"
         assert (build_dir / "apple-touch-icon.png").exists(), "apple-touch-icon.png should exist"
