@@ -575,9 +575,6 @@ class GreatDocs:
         gitignore_path = self.project_path / ".gitignore"
         gitignore_path.write_text(gitignore_content, encoding="utf-8")
 
-        # Create index.qmd from README.md or user_guide files
-        self._create_index_from_readme(force_rebuild=True)
-
         # Note: User guide files are copied by _process_user_guide() during build
         # which handles stripping numeric prefixes for clean URLs
 
@@ -612,6 +609,11 @@ class GreatDocs:
         if self._has_api_reference:
             self._update_sidebar_from_sections()
             self._update_reference_index_frontmatter()
+
+        # Build the homepage after the API reference configuration. Its metadata
+        # margin can then include links to `llms.txt` and `llms-full.txt` when the
+        # build will generate them.
+        self._create_index_from_readme(force_rebuild=True)
 
     def _copy_user_guide_files(self) -> None:
         """

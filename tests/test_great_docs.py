@@ -17457,6 +17457,36 @@ def test_prepare_build_directory_creates_structure():
         assert "markdown_pages" in options
 
 
+def test_prepare_build_directory_adds_llms_links_after_api_reference_setup():
+    """Include `llms.txt` links after API reference setup"""
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        pyproject = Path(tmp_dir) / "pyproject.toml"
+        pyproject.write_text('[project]\nname = "mypkg"\n', encoding="utf-8")
+
+        readme = Path(tmp_dir) / "README.md"
+        readme.write_text("# Example\n\nPackage documentation.\n", encoding="utf-8")
+
+        package_dir = Path(tmp_dir) / "mypkg"
+        package_dir.mkdir()
+        (package_dir / "__init__.py").write_text(
+            'def widget():\n    """Perform no operation"""\n', encoding="utf-8"
+        )
+
+        sys.path.insert(0, tmp_dir)
+        try:
+            docs = GreatDocs(project_path=tmp_dir)
+            sections = [{"title": "All", "desc": "", "contents": ["widget"]}]
+            with patch.object(docs, "_create_api_sections_with_config", return_value=sections):
+                docs._prepare_build_directory()
+
+            index_content = (docs.project_path / "index.qmd").read_text()
+            assert "llms.txt" in index_content
+            assert "llms-full.txt" in index_content
+        finally:
+            sys.path.remove(tmp_dir)
+
+
 def test_prepare_build_directory_copies_js_files():
     """Test _prepare_build_directory copies JavaScript files."""
 
