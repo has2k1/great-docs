@@ -575,9 +575,6 @@ class GreatDocs:
         gitignore_path = self.project_path / ".gitignore"
         gitignore_path.write_text(gitignore_content, encoding="utf-8")
 
-        # Create index.qmd from README.md or user_guide files
-        self._create_index_from_readme(force_rebuild=True)
-
         # Note: User guide files are copied by _process_user_guide() during build
         # which handles stripping numeric prefixes for clean URLs
 
@@ -612,6 +609,11 @@ class GreatDocs:
         if self._has_api_reference:
             self._update_sidebar_from_sections()
             self._update_reference_index_frontmatter()
+
+        # Build the homepage after the API reference configuration. Its metadata
+        # margin can then include links to `llms.txt` and `llms-full.txt` when the
+        # build will generate them.
+        self._create_index_from_readme(force_rebuild=True)
 
     def _copy_user_guide_files(self) -> None:
         """
@@ -10339,11 +10341,13 @@ class GreatDocs:
                 '<path d="M20 3v4"/><path d="M22 5h-4"/></svg>'
             )
             ai_items.append(f'<a href="skills.html">Skills{_sparkle_svg}</a><br>')
-        ai_items.append("[llms.txt](llms.txt)<br>")
-        ai_items.append("[llms-full.txt](llms-full.txt)<br>")
+        if self._llms_txt_available():
+            ai_items.append("[llms.txt](llms.txt)<br>")
+            ai_items.append("[llms-full.txt](llms-full.txt)<br>")
 
-        margin_sections.append(f"\n#### {get_translation('ai_agents', lang)}\n")
-        margin_sections.extend(ai_items)
+        if ai_items:
+            margin_sections.append(f"\n#### {get_translation('ai_agents', lang)}\n")
+            margin_sections.extend(ai_items)
 
         # ── 3. Developers (Authors + Funding) ────────────────────────────
         authors_to_display = metadata.get("rich_authors") or metadata.get("authors", [])
@@ -13671,6 +13675,45 @@ anchor-sections: true
         with open(index_path, "w") as f:
             f.write(content)
 
+    def _llms_txt_available(self) -> bool:
+        """
+        Predict whether the build will generate `llms.txt` and `llms-full.txt`
+
+        The homepage margin queries this before either file exists, so it must
+        predict whether the build will generate them.
+
+        Both files require `_quarto.yml` to contain an `api-reference` block
+        with an importable `package` and at least one section.
+
+        Returns
+        -------
+        bool
+            Whether the build should write both files.
+        """
+        quarto_yml = self.project_path / "_quarto.yml"
+        if not quarto_yml.exists():
+            return False
+        try:
+            with open(quarto_yml, "r") as f:
+                config = read_yaml(f) or {}
+        except (OSError, ValueError):
+            return False
+        if not isinstance(config, dict):
+            return False
+        api_ref_config = config.get("api-reference")
+        if not isinstance(api_ref_config, dict):
+            return False
+        package_name = api_ref_config.get("package")
+        if not package_name or not api_ref_config.get("sections"):
+            return False
+        try:
+            import importlib
+
+            importlib.import_module(str(package_name).replace("-", "_"))
+        except ImportError:
+            return False
+        return True
+
     def _generate_llms_txt(self) -> None:
         """
         Generate an llms.txt file for LLM documentation indexing.
@@ -14211,8 +14254,9 @@ anchor-sections: true
         lines.append("")
         if site_url:
             lines.append(f"- [Full documentation]({site_url})")
-        lines.append("- [llms.txt](llms.txt) — Indexed API reference for LLMs")
-        lines.append("- [llms-full.txt](llms-full.txt) — Comprehensive documentation for LLMs")
+        if self._llms_txt_available():
+            lines.append("- [llms.txt](llms.txt) — Indexed API reference for LLMs")
+            lines.append("- [llms-full.txt](llms-full.txt) — Comprehensive documentation for LLMs")
         if repo_url:
             lines.append(f"- [Source code]({repo_url})")
         lines.append("")
@@ -16160,10 +16204,13 @@ anchor-sections: true
             # ── Step 3: Generate llms.txt / llms-full.txt ──────────────
             step += 1
             log.step_start(step, "Generate llms.txt / llms-full.txt")
-            with _quiet_prints():
-                self._generate_llms_txt()
-                self._generate_llms_full_txt()
-            log.step_done("Created llms.txt + llms-full.txt")
+            if self._llms_txt_available():
+                with _quiet_prints():
+                    self._generate_llms_txt()
+                    self._generate_llms_full_txt()
+                log.step_done("Created llms.txt + llms-full.txt")
+            else:
+                log.step_skip(step, "no API reference")
 
             # ── Step 4: Generate SKILL.md ──────────────────────────────
             step += 1
