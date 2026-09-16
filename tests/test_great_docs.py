@@ -13959,7 +13959,7 @@ def test_build_metadata_margin_llms_links():
         gd_dir = Path(tmp_dir) / "great-docs"
         gd_dir.mkdir()
         (gd_dir / "_quarto.yml").write_text(
-            "api-reference:\n  package: pkg\n  sections:\n    - title: Core\n      contents: [pkg.f]\n",
+            "api-reference:\n  package: os\n  sections:\n    - title: Core\n      contents: [os.getcwd]\n",
             encoding="utf-8",
         )
         docs = GreatDocs(project_path=tmp_dir)
@@ -38822,7 +38822,7 @@ requires-python = ">=3.10"
         quarto_yml.write_text(
             """
 api-reference:
-  package: test_package
+  package: os
   sections:
     - title: Core
       desc: Core functionality
@@ -39679,8 +39679,8 @@ def test_homepage_sidebar_skills_link_position():
         great_docs_dir.mkdir()
         # llms.txt links are only shown when the files will be generated (#350)
         (great_docs_dir / "_quarto.yml").write_text(
-            "api-reference:\n  package: test_package\n  sections:\n"
-            "    - title: Core\n      contents: [test_package.f]\n",
+            "api-reference:\n  package: os\n  sections:\n"
+            "    - title: Core\n      contents: [os.getcwd]\n",
             encoding="utf-8",
         )
 
