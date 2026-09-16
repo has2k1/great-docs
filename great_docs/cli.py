@@ -15,7 +15,7 @@ from ._subprocess import TEXT_MODE_KWARGS
 from .core import GreatDocs
 
 if TYPE_CHECKING:
-    from ._layout_migration import Migration, Note
+    from ._layout_migration import Migration, Move, Note
 
 
 def _config_option(function: Callable[..., Any]) -> Callable[..., Any]:
@@ -844,6 +844,20 @@ def _highlight_path(note: "Note", root: Path) -> str:
     return note[:offset] + display_path + note[offset + len(path_text) :]
 
 
+def _relocate_note(note: "Note", moves: "tuple[Move, ...]") -> "Note":
+    """Point a note at its file's post-move location, once a migration has applied"""
+    from ._layout_migration.model import Note, moved_path
+
+    if note.path is None:
+        return note
+    moved = moved_path(note.path, moves)
+    if moved == note.path:
+        return note
+    old_text = str(note.path)
+    message = note.replace(old_text, str(moved)) if old_text in note else str(note)
+    return Note(message, category=note.category, path=moved, line=note.line, snippet=note.snippet)
+
+
 def _print_notes(
     label: str, notes: "tuple[Note, ...]", color: str, *, root: Path, err: bool = False
 ) -> None:
@@ -983,8 +997,18 @@ def migrate_layout(
         click.echo("Build or preview the migrated documentation:")
         click.echo("  " + shlex.join(["great-docs", "build", *selection]))
         click.echo("  " + shlex.join(["great-docs", "preview", *selection]))
-        for item in migration.follow_up:
-            click.echo(item)
+        if migration.follow_up:
+            click.echo()
+            _print_notes(
+                _count_phrase(
+                    len(migration.follow_up),
+                    "File to Review",
+                    "Files to Review",
+                ),
+                tuple(_relocate_note(note, migration.moves) for note in migration.follow_up),
+                "yellow",
+                root=root,
+            )
     except (OSError, ValueError) as error:
         raise click.ClickException(str(error)) from error
 
