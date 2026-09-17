@@ -23,6 +23,8 @@ import warnings
 from pathlib import Path
 from typing import Callable, Iterable
 
+from great_docs._layout import Layout
+
 # These packages cover both citation backlink forms. The first has three
 # definitions and one reference, which produces a caret backlink. The second
 # has one definition and two references, which produces lettered backlinks.
@@ -56,7 +58,7 @@ _LIVE_HOLDER_STALE_SECONDS = 900.0
 
 def site_dir(rendered_dir: Path, name: str) -> Path:
     """
-    Return the rendered site directory for a Gauntlet package
+    Return a Gauntlet package's rendered site directory
 
     Parameters
     ----------
@@ -67,9 +69,11 @@ def site_dir(rendered_dir: Path, name: str) -> Path:
 
     Returns
     -------
-        The package's `_site` directory.
+    Path
+        The package's `_site` directory, resolved from whichever layout the
+        package's `great-docs.yml` actually lives under.
     """
-    return rendered_dir / name / "great-docs" / "_site"
+    return Layout.make(rendered_dir / name).site_dir
 
 
 def sentinel_path(rendered_dir: Path, name: str) -> Path:
