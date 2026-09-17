@@ -492,7 +492,7 @@ def test_L2_explicit_reference_survives_init(pkg_name: str, tmp_path: Path):
     docs.install(force=True)
 
     # Re-read the generated config
-    config_path = pkg_dir / "great-docs.yml"
+    config_path = docs.layout.config_path
     with open(config_path, encoding="utf-8") as f:
         config_data = read_yaml(f)
 
@@ -849,7 +849,7 @@ def test_L2_cli_config_preserved(pkg_name: str, tmp_path: Path):
 
     from yaml12 import format_yaml, parse_yaml, read_yaml
 
-    config_path = pkg_dir / "great-docs.yml"
+    config_path = docs.layout.config_path
     assert config_path.exists(), "great-docs.yml was not created"
 
     with open(config_path, encoding="utf-8") as f:
@@ -936,7 +936,7 @@ def _setup_blended_homepage(pkg_dir: Path, spec: dict) -> GreatDocs:
 
     # Re-apply spec config entries that install() doesn't preserve
     if "config" in spec:
-        config_path = docs._find_package_root() / "great-docs.yml"
+        config_path = docs.layout.config_path
         with open(config_path, "r", encoding="utf-8") as f:
             existing = read_yaml(f) or {}
         existing.update(spec["config"])
