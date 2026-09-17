@@ -293,7 +293,9 @@ def test_documentation_sources(source_project: tuple[Path, Path], explicit: bool
     assert config["bibliography"] == "references.bib"
     assert {"file": "_includes/header.html"} in config["format"]["html"]["include-in-header"]
     assert gd._find_package_root() == root
-    assert gd.layout.cache_dir == root / ".great-docs-cache"
+    assert gd.layout.cache_dir == (
+        root / ".great-docs-cache" if root == source else source / ".cache"
+    )
     if source != root:
         assert not (source / "_quarto/_quarto.yml").exists()
 

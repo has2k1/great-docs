@@ -16,14 +16,15 @@ def _write_config(path: Path) -> Path:
 
 
 @pytest.mark.parametrize(
-    ("config_relative", "build_relative", "site_relative", "freeze_relative"),
+    ("config_relative", "build_relative", "site_relative", "freeze_relative", "cache_relative"),
     [
-        ("great-docs.yml", "great-docs", "great-docs/_site", "_freeze"),
+        ("great-docs.yml", "great-docs", "great-docs/_site", "_freeze", ".great-docs-cache"),
         (
             "docs/great-docs.yml",
             "docs/_quarto/default",
             "docs/_site",
             "docs/_freeze",
+            "docs/.cache",
         ),
     ],
 )
@@ -33,6 +34,7 @@ def test_conventional_config_selects_layout(
     build_relative: str,
     site_relative: str,
     freeze_relative: str,
+    cache_relative: str,
 ) -> None:
     (tmp_path / "pyproject.toml").write_text("[project]\nname = 'demo'\n")
     config = _write_config(tmp_path / config_relative)
@@ -46,7 +48,7 @@ def test_conventional_config_selects_layout(
         build_dir=tmp_path / build_relative,
         site_dir=tmp_path / site_relative,
         freeze_dir=tmp_path / freeze_relative,
-        cache_dir=tmp_path / ".great-docs-cache",
+        cache_dir=tmp_path / cache_relative,
     )
 
 
@@ -60,7 +62,7 @@ def test_custom_config_keeps_package_root(tmp_path: Path) -> None:
     assert layout.source_dir == config.parent
     assert layout.build_dir == config.parent / "_quarto" / "default"
     assert layout.site_dir == config.parent / "_site"
-    assert layout.cache_dir == tmp_path / ".great-docs-cache"
+    assert layout.cache_dir == config.parent / ".cache"
 
 
 def test_automatic_selection_rejects_ambiguous_configs(tmp_path: Path) -> None:

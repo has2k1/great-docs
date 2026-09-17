@@ -75,9 +75,11 @@ class Layout:
         if source_dir == package_root:
             build_dir = package_root / "great-docs"
             site_dir = build_dir / "_site"
+            cache_dir = package_root / ".great-docs-cache"
         else:
             build_dir = source_dir / "_quarto" / "default"
             site_dir = source_dir / "_site"
+            cache_dir = source_dir / ".cache"
 
         return cls(
             package_root=package_root,
@@ -86,7 +88,7 @@ class Layout:
             build_dir=build_dir,
             site_dir=site_dir,
             freeze_dir=source_dir / "_freeze",
-            cache_dir=package_root / ".great-docs-cache",
+            cache_dir=cache_dir,
         )
 
     def build_dir_for(self, tag: str, latest_tag: str) -> Path:

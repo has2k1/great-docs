@@ -72,7 +72,13 @@ class Config:
     with sensible defaults.
     """
 
-    def __init__(self, project_root: Path, *, config_path: Path | None = None):
+    def __init__(
+        self,
+        project_root: Path,
+        *,
+        config_path: Path | None = None,
+        cache_dir: Path | None = None,
+    ):
         """
         Initialise configuration from `great-docs.yml`
 
@@ -83,12 +89,15 @@ class Config:
         config_path
             Configuration file to load. Defaults to `great-docs.yml` at the
             package root.
+        cache_dir
+            Persistent cache location. Defaults to `.great-docs-cache` under
+            `project_root` when no resolved `Layout` supplies one.
         """
         self.project_root = project_root
         self.config_path = (
             config_path if config_path is not None else project_root / "great-docs.yml"
         )
-        self.cache_dir = project_root / ".great-docs-cache"
+        self.cache_dir = cache_dir if cache_dir is not None else project_root / ".great-docs-cache"
         self._config = self._load_config()
 
     def _load_config(self) -> dict[str, Any]:

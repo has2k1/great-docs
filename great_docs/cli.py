@@ -1202,7 +1202,9 @@ def _freeze_info(project_root: Path, persist_dir: Path, layout: Layout | None = 
     from great_docs.config import Config
 
     layout = layout or Layout.make(project_root)
-    cfg = Config(layout.package_root, config_path=layout.config_path)
+    cfg = Config(
+        layout.package_root, config_path=layout.config_path, cache_dir=layout.cache_dir
+    )
     project_mode = cfg.freeze
 
     click.echo()
@@ -3386,7 +3388,7 @@ def versions(project_path: str | None, check: bool, config_path: str | None = No
         project_root = Path(project_path or ".").resolve()
         layout = Layout.make(project_root, Path(config_path) if config_path else None)
         project_root = layout.package_root
-        cfg = Config(project_root, config_path=layout.config_path)
+        cfg = Config(project_root, config_path=layout.config_path, cache_dir=layout.cache_dir)
 
         if not cfg.has_versions:
             click.echo("No versions configured in great-docs.yml.")
