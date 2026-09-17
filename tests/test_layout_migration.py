@@ -555,8 +555,12 @@ def test_analysis_is_read_only_with_shared_assets(project: Path, destination: st
     assert project / "user_guide" in fingerprints
     edits = {edit.path: edit for edit in migration.edits}
     assert project / "user_guide/page.qmd" not in edits
-    assert edits[project / ".gitignore"].after == (
-        f"great-docs/\n_freeze/\n/{destination}/_quarto/\n/{destination}/_site/\n".encode()
+    assert (
+        edits[project / ".gitignore"].after
+        == (
+            f"great-docs/\n_freeze/\n/{destination}/_quarto/\n/{destination}/_site/\n"
+            f"/{destination}/.cache/\n"
+        ).encode()
     )
 
 
@@ -719,6 +723,46 @@ def test_destination_collisions_block_without_writes(project: Path, target: str)
     result = analyse(Layout.make(project, project / "great-docs.yml"), Path("docs"))
     assert any(target in message for message in result.blockers)
     assert snapshot(project) == before
+
+
+def test_migration_moves_existing_cache_into_destination(project: Path) -> None:
+    put(project, ".great-docs-cache/d2/abc.svg", "<svg/>")
+    put(project, ".great-docs-cache/snapshots/v0.2.0.json", "{}")
+    result = analyse(Layout.make(project), Path("docs"))
+    assert not result.blockers
+    assert Move(project / ".great-docs-cache/d2", project / "docs/.cache/d2") in result.moves
+    assert (
+        Move(project / ".great-docs-cache/snapshots", project / "docs/.cache/snapshots")
+        in result.moves
+    )
+
+
+def test_migration_blocks_existing_destination_cache(project: Path) -> None:
+    put(project, ".great-docs-cache/d2/abc.svg", "<svg/>")
+    put(project, "docs/.cache/d2/abc.svg", "<svg/>")
+    before = snapshot(project)
+    result = analyse(Layout.make(project), Path("docs"))
+    assert any("Destination cache already exists" in message for message in result.blockers)
+    assert snapshot(project) == before
+
+
+def test_migration_blocks_non_directory_cache(project: Path) -> None:
+    put(project, ".great-docs-cache/d2", "not a directory")
+    result = analyse(Layout.make(project), Path("docs"))
+    assert any("Persistent cache must be a directory" in message for message in result.blockers)
+
+
+def test_migration_applies_cache_move_to_disk(project: Path) -> None:
+    from great_docs._layout_migration import apply
+
+    put(project, ".great-docs-cache/d2/abc.svg", "<svg/>")
+    put(project, ".great-docs-cache/snapshots/v0.2.0.json", "{}")
+    migration = analyse(Layout.make(project), Path("docs"))
+    apply(migration)
+    assert (project / "docs/.cache/d2/abc.svg").read_text() == "<svg/>"
+    assert (project / "docs/.cache/snapshots/v0.2.0.json").read_text() == "{}"
+    assert not (project / ".great-docs-cache/d2").exists()
+    assert not (project / ".great-docs-cache/snapshots").exists()
 
 
 @pytest.mark.parametrize("source", ["sample", "src", "user_guide/sub", "great-docs", "docs/inside"])

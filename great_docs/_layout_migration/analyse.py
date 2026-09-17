@@ -1088,6 +1088,32 @@ def analyse(layout: Layout, destination: Path) -> Migration:
             _check_freeze_ignore_policy(root, destination, freeze_paths, retain, retain_policy)
         except (OSError, UnicodeError, MigrationError) as error:
             blockers.append(Note(str(error), category="Cached Build Conflicts", path=freeze))
+    cache_root = root / ".great-docs-cache"
+    target_cache = destination / ".cache"
+    for name in ("d2", "snapshots"):
+        source_cache = cache_root / name
+        if not source_cache.exists() and not source_cache.is_symlink():
+            continue
+        retain(source_cache)
+        dest_cache = target_cache / name
+        if dest_cache.exists() or dest_cache.is_symlink():
+            blockers.append(
+                Note(
+                    f"Destination cache already exists: {dest_cache}",
+                    category="Cached Build Conflicts",
+                    path=dest_cache,
+                )
+            )
+        elif not source_cache.is_dir():
+            blockers.append(
+                Note(
+                    f"Persistent cache must be a directory: {source_cache}",
+                    category="Cached Build Conflicts",
+                    path=source_cache,
+                )
+            )
+        else:
+            moves.append(Move(source_cache, dest_cache))
     for build in generated:
         retain(build / "_quarto.yml")
         follow_up.append(
@@ -1106,7 +1132,7 @@ def analyse(layout: Layout, destination: Path) -> Migration:
             prefix = destination.relative_to(root).as_posix()
             additions = [
                 f"/{prefix}/{name}/"
-                for name in ("_quarto", "_site")
+                for name in ("_quarto", "_site", ".cache")
                 if f"/{prefix}/{name}/" not in ignore_text.splitlines()
             ]
             if additions:
