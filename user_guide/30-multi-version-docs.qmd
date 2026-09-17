@@ -605,7 +605,7 @@ Versioned builds work in these directories:
 - Store the latest Quarto project in `docs/_quarto/default/`, regardless of its tag. Great Docs recreates it at the start of each build.
 - Store each historical Quarto project in `docs/_quarto/<tag>/`, retaining its own `_site/` output. Great Docs recreates only marked projects selected for the build.
 - Deploy the assembled site from `docs/_site/`, with the latest version at its root and historical versions under `v/<version>/`.
-- Cache Git-introspected API snapshots in the package-root `.great-docs-cache/` directory.
+- Cache Git-introspected API snapshots in `docs/.cache/`, or beside a custom configuration file.
 
 Every Quarto project sits two levels below the configuration directory, whether or not you configure `versions:`. Non-versioned builds also use `docs/_quarto/default/`.
 
@@ -622,7 +622,7 @@ Add these to your `.gitignore`. Great Docs does this automatically when you run 
 ```{.text filename=".gitignore"}
 /docs/_quarto/
 /docs/_site/
-.great-docs-cache/
+/docs/.cache/
 .great-docs/
 ```
 
