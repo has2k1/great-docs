@@ -1383,6 +1383,49 @@ class TestRebuildApiFromGitRefCustomCacheDir:
         assert not (tmp_path / ".great-docs-cache").exists()
 
 
+class TestPruneCliPagesForVersionCustomCacheDir:
+    def test_uses_config_cache_dir_over_project_root(self, tmp_path: Path) -> None:
+        from great_docs._api_diff import ApiSnapshot, CliCommandInfo
+        from great_docs._versioned_build import _prune_cli_pages_for_version
+        from great_docs.config import Config
+
+        entry = VersionEntry(tag="0.2", label="0.2", latest=False, git_ref="v0.2.0")
+
+        # Keep the snapshot only in the custom cache; leave the legacy path absent.
+        custom_cache = tmp_path / "docs" / ".cache"
+        cache_dir = custom_cache / "snapshots"
+        cache_dir.mkdir(parents=True)
+        snap = ApiSnapshot(
+            version="0.2",
+            package_name="pkg",
+            symbols={"func": SymbolInfo(name="func", kind="function")},
+            cli_commands=CliCommandInfo(
+                name="cli",
+                help="CLI tool",
+                subcommands=[
+                    CliCommandInfo(name="build", help="Build docs"),
+                ],
+            ),
+        )
+        snap.save(cache_dir / "v0.2.0.json")
+        config = Config(
+            tmp_path, config_path=tmp_path / "docs" / "great-docs.yml", cache_dir=custom_cache
+        )
+
+        cli_dir = tmp_path / "reference" / "cli"
+        cli_dir.mkdir(parents=True)
+        (cli_dir / "index.qmd").write_text("CLI index")
+        (cli_dir / "build.qmd").write_text("Build command")
+        (cli_dir / "old_command.qmd").write_text("Old command")
+
+        _prune_cli_pages_for_version(tmp_path, tmp_path, entry, config)
+
+        assert (cli_dir / "build.qmd").exists()
+        assert (cli_dir / "index.qmd").exists()
+        assert not (cli_dir / "old_command.qmd").exists()
+        assert not (tmp_path / ".great-docs-cache").exists()
+
+
 # ---------------------------------------------------------------------------
 # _collect_qmd_files
 # ---------------------------------------------------------------------------

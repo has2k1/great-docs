@@ -727,10 +727,15 @@ def test_destination_collisions_block_without_writes(project: Path, target: str)
 
 def test_migration_moves_existing_cache_into_destination(project: Path) -> None:
     put(project, ".great-docs-cache/d2/abc.svg", "<svg/>")
+    put(project, ".great-docs-cache/interlinks/pkg_objects.inv", b"\x00\x01")
     put(project, ".great-docs-cache/snapshots/v0.2.0.json", "{}")
     result = analyse(Layout.make(project), Path("docs"))
     assert not result.blockers
     assert Move(project / ".great-docs-cache/d2", project / "docs/.cache/d2") in result.moves
+    assert (
+        Move(project / ".great-docs-cache/interlinks", project / "docs/.cache/interlinks")
+        in result.moves
+    )
     assert (
         Move(project / ".great-docs-cache/snapshots", project / "docs/.cache/snapshots")
         in result.moves
@@ -739,7 +744,9 @@ def test_migration_moves_existing_cache_into_destination(project: Path) -> None:
 
 def test_migration_blocks_existing_destination_cache(project: Path) -> None:
     put(project, ".great-docs-cache/d2/abc.svg", "<svg/>")
+    put(project, ".great-docs-cache/interlinks/pkg_objects.inv", b"\x00\x01")
     put(project, "docs/.cache/d2/abc.svg", "<svg/>")
+    put(project, "docs/.cache/interlinks/pkg_objects.inv", b"\x00\x01")
     before = snapshot(project)
     result = analyse(Layout.make(project), Path("docs"))
     assert any("Destination cache already exists" in message for message in result.blockers)
@@ -748,6 +755,7 @@ def test_migration_blocks_existing_destination_cache(project: Path) -> None:
 
 def test_migration_blocks_non_directory_cache(project: Path) -> None:
     put(project, ".great-docs-cache/d2", "not a directory")
+    put(project, ".great-docs-cache/interlinks", "not a directory")
     result = analyse(Layout.make(project), Path("docs"))
     assert any("Persistent cache must be a directory" in message for message in result.blockers)
 
@@ -756,12 +764,15 @@ def test_migration_applies_cache_move_to_disk(project: Path) -> None:
     from great_docs._layout_migration import apply
 
     put(project, ".great-docs-cache/d2/abc.svg", "<svg/>")
+    put(project, ".great-docs-cache/interlinks/pkg_objects.inv", "cached inventory")
     put(project, ".great-docs-cache/snapshots/v0.2.0.json", "{}")
     migration = analyse(Layout.make(project), Path("docs"))
     apply(migration)
     assert (project / "docs/.cache/d2/abc.svg").read_text() == "<svg/>"
+    assert (project / "docs/.cache/interlinks/pkg_objects.inv").read_text() == "cached inventory"
     assert (project / "docs/.cache/snapshots/v0.2.0.json").read_text() == "{}"
     assert not (project / ".great-docs-cache/d2").exists()
+    assert not (project / ".great-docs-cache/interlinks").exists()
     assert not (project / ".great-docs-cache/snapshots").exists()
 
 
