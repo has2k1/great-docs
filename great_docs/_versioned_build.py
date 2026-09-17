@@ -487,13 +487,16 @@ def _prune_sidebar_contents(contents: list, dest_dir: Path) -> list:
     return result
 
 
-def _prune_cli_pages_for_version(dest_dir: Path, project_root: Path, entry: VersionEntry) -> None:
-    """Load the cached snapshot for a version and prune stale CLI pages."""
+def _prune_cli_pages_for_version(
+    dest_dir: Path, project_root: Path, entry: VersionEntry, config: Config | None = None
+) -> None:
+    """Load a version's cached snapshot and remove obsolete CLI pages."""
     git_ref = entry.git_ref
     if not git_ref:
         return
 
-    cache_path = _snapshot_cache_path(project_root, git_ref)
+    cache_dir = config.cache_dir if config is not None else project_root / ".great-docs-cache"
+    cache_path = _snapshot_cache_path(cache_dir, git_ref)
     if not cache_path.exists():
         return
 
@@ -631,7 +634,7 @@ def preprocess_version(
 
     # 5. Prune CLI pages that don't exist at this version
     if entry.git_ref and project_root:
-        _prune_cli_pages_for_version(dest_dir, project_root, entry)
+        _prune_cli_pages_for_version(dest_dir, project_root, entry, config)
 
     # 6. Expand inline [version-badge] markers and version callouts
     for qmd_file in _collect_qmd_files(dest_dir):
@@ -1358,9 +1361,9 @@ def _validate_git_ref_is_tag(project_root: Path, git_ref: str) -> bool:
         return False
 
 
-def _snapshot_cache_path(project_root: Path, git_ref: str) -> Path:
+def _snapshot_cache_path(cache_dir: Path, git_ref: str) -> Path:
     """Return the cache file path for a git-ref snapshot."""
-    return project_root / ".great-docs-cache" / "snapshots" / f"{git_ref}.json"
+    return cache_dir / "snapshots" / f"{git_ref}.json"
 
 
 def _rebuild_api_from_git_ref(
@@ -1414,7 +1417,8 @@ def _rebuild_api_from_git_ref(
         return []
 
     # Check cache first
-    cache_path = _snapshot_cache_path(project_root, git_ref)
+    cache_dir = config.cache_dir if config is not None else project_root / ".great-docs-cache"
+    cache_path = _snapshot_cache_path(cache_dir, git_ref)
     if cache_path.exists():
         snap = ApiSnapshot.load(cache_path)
     else:

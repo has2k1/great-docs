@@ -16707,7 +16707,7 @@ anchor-sections: true
             # (Mermaid is rendered by Quarto client-side; d2 has no native support.)
             from great_docs._d2 import process_directory as _render_d2
 
-            d2_cache = self.project_root / ".great-docs-cache" / "d2"
+            d2_cache = self.layout.cache_dir / "d2"
             d2_modified = _render_d2(self.build_dir, cache_dir=d2_cache)
             if d2_modified:
                 log.detail(
