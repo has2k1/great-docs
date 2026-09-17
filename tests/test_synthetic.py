@@ -580,7 +580,7 @@ def test_generator_with_config_override(tmp_path: Path):
     )
     pkg_dir = generate_package(spec, tmp_path, config_override=config_path)
 
-    config_file = pkg_dir / "great-docs.yml"
+    config_file = pkg_dir / "docs" / "great-docs.yml"
     assert config_file.exists()
     content = config_file.read_text()
     assert "google" in content
