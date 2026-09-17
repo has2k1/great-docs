@@ -1090,7 +1090,9 @@ def analyse(layout: Layout, destination: Path) -> Migration:
             blockers.append(Note(str(error), category="Cached Build Conflicts", path=freeze))
     cache_root = root / ".great-docs-cache"
     target_cache = destination / ".cache"
-    for name in ("d2", "snapshots"):
+    # Move each cache separately. The root also contains this command's
+    # recovery journal, and the apply step rejects overlapping moves.
+    for name in ("d2", "interlinks", "snapshots"):
         source_cache = cache_root / name
         if not source_cache.exists() and not source_cache.is_symlink():
             continue

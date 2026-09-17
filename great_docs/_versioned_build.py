@@ -490,7 +490,21 @@ def _prune_sidebar_contents(contents: list, dest_dir: Path) -> list:
 def _prune_cli_pages_for_version(
     dest_dir: Path, project_root: Path, entry: VersionEntry, config: Config | None = None
 ) -> None:
-    """Load a version's cached snapshot and remove obsolete CLI pages."""
+    """
+    Load a version's cached snapshot and remove obsolete CLI pages
+
+    Parameters
+    ----------
+    dest_dir
+        The version's build directory.
+    project_root
+        Project root (git repo root).
+    entry
+        The version entry with `git_ref` set.
+    config
+        Optional project configuration. Selects the snapshot cache location;
+        defaults to `project_root / ".great-docs-cache"` when omitted.
+    """
     git_ref = entry.git_ref
     if not git_ref:
         return
@@ -1387,8 +1401,10 @@ def _rebuild_api_from_git_ref(
     entry
         The version entry with `git_ref` set.
     config
-        Project configuration, forwarded to `_rebuild_api_from_snapshot` for
-        rebuilding the inventory and interlinks index. Skipped when omitted.
+        Optional project configuration. Selects the snapshot cache location
+        and is forwarded to `_rebuild_api_from_snapshot` when rebuilding the
+        inventory and interlinks index. Defaults to
+        `project_root / ".great-docs-cache"` when omitted.
 
     Returns
     -------

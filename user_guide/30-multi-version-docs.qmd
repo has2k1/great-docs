@@ -472,7 +472,7 @@ versions:
     git_ref: v0.2.0
 ```
 
-Only Git **tags** are accepted (not branches or arbitrary SHAs). This is a security restriction: tags are immutable references to reviewed, released code. Results are cached in `.great-docs-cache/snapshots/` so subsequent builds don't repeat the introspection. This strategy is slower on the first build but fully hands-off after that.
+Only Git **tags** are accepted, not branches or arbitrary SHAs. This security restriction ensures that introspection uses immutable references to reviewed, released code. Great Docs caches the results in `docs/.cache/snapshots/`, so later builds do not repeat the introspection. The first build is slower; later builds run without further configuration.
 
 ### Strategy C: Automatic Snapshots
 
