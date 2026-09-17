@@ -384,6 +384,14 @@ def build_site(rendered_dir: Path, name: str) -> Path:
                 f"Quarto could not render {name} (exit code {result.returncode}):\n{tail}"
             )
 
+        # The docs layout renders Quarto's default `_site` inside the build
+        # directory, separate from the public site. Mirror `GreatDocs.build()`
+        # because this builder runs the render stages directly.
+        if docs.layout.site_dir != docs.build_dir / "_site":
+            from great_docs._versioned_build import assemble_site
+
+            assemble_site(docs.build_dir, [], "", docs.layout.site_dir, layout=docs.layout)
+
         published = rendered_dir / name
         _clear_package_dir(rendered_dir, name)
         os.replace(pkg_dir, published)
