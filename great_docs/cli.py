@@ -1202,9 +1202,7 @@ def _freeze_info(project_root: Path, persist_dir: Path, layout: Layout | None = 
     from great_docs.config import Config
 
     layout = layout or Layout.make(project_root)
-    cfg = Config(
-        layout.package_root, config_path=layout.config_path, cache_dir=layout.cache_dir
-    )
+    cfg = Config(layout.package_root, config_path=layout.config_path, cache_dir=layout.cache_dir)
     project_mode = cfg.freeze
 
     click.echo()

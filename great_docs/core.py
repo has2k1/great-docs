@@ -237,7 +237,9 @@ class GreatDocs:
 
         # Load configuration from great-docs.yml
         self._config = Config(
-            self.layout.package_root, config_path=self.layout.config_path, cache_dir=self.layout.cache_dir
+            self.layout.package_root,
+            config_path=self.layout.config_path,
+            cache_dir=self.layout.cache_dir,
         )
 
         # Whether API reference was successfully configured (set during build)
@@ -903,7 +905,9 @@ class GreatDocs:
 
         # Reload configuration after generating it
         self._config = Config(
-            self.layout.package_root, config_path=self.layout.config_path, cache_dir=self.layout.cache_dir
+            self.layout.package_root,
+            config_path=self.layout.config_path,
+            cache_dir=self.layout.cache_dir,
         )
 
         # Update project root .gitignore to exclude great-docs/
@@ -1899,7 +1903,9 @@ class GreatDocs:
 
         # Read Great Docs configuration from great-docs.yml
         # Reload config to ensure we have the latest
-        self._config = Config(package_root, config_path=self.layout.config_path, cache_dir=self.layout.cache_dir)
+        self._config = Config(
+            package_root, config_path=self.layout.config_path, cache_dir=self.layout.cache_dir
+        )
 
         # Map config properties to metadata dict for backward compatibility
         metadata["rich_authors"] = self._config.authors
@@ -12840,9 +12846,7 @@ anchor-sections: true
                 first_href = _SECTION_INDEX.get(ref_sections[0], "reference/index.qmd")
                 navbar = config.get("website", {}).get("navbar", {})
                 for item in navbar.get("left", []):
-                    if isinstance(item, dict) and (item.get("href") or "").startswith(
-                        "reference/"
-                    ):
+                    if isinstance(item, dict) and (item.get("href") or "").startswith("reference/"):
                         item["href"] = first_href
                         break
 
