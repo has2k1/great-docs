@@ -416,6 +416,7 @@ def test_api_reference_build_uses_selected_cwd(
         assert Path.cwd() == gd.build_dir
         raise ReferenceReached
 
+    monkeypatch.setattr("great_docs.core._ensure_quarto_installed", lambda: None)
     monkeypatch.setattr(gd, "_prepare_build_directory", prepare_reference)
     monkeypatch.setattr(APIReference, "__init__", lambda self, path: None)
     monkeypatch.setattr(APIReference, "build", check_cwd)
