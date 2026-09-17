@@ -942,8 +942,8 @@ class GreatDocs:
             entries = [
                 f"/{source}/_quarto/",
                 f"/{source}/_site/",
+                f"/{source}/.cache/",
                 "/.great-docs-build/",
-                "/.great-docs-cache/",
                 "/.great-docs/",
             ]
             content = gitignore_path.read_text(encoding="utf-8") if gitignore_path.exists() else ""

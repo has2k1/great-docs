@@ -44247,6 +44247,24 @@ def test_update_gitignore_migration_only_prompts_with_migration_msg(monkeypatch)
         assert gitignore.read_text() == original
 
 
+def test_update_gitignore_docs_layout_ignores_source_relative_cache():
+    """Keep a custom-layout cache out of version control."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        root = Path(tmp_dir)
+        (root / "pyproject.toml").write_text('[project]\nname = "sample"\n')
+        config_path = root / "docs" / "great-docs.yml"
+        config_path.parent.mkdir()
+        config_path.write_text("module: sample\n")
+
+        docs = GreatDocs(str(root), config_path=str(config_path))
+        docs._update_project_gitignore(force=True)
+
+        content = (root / ".gitignore").read_text()
+
+        assert "/docs/.cache/" in content
+        assert ".great-docs-cache/" not in content
+
+
 # ---------------------------------------------------------------------------
 # _generate_favicons — SVG source with cairosvg=None
 # ---------------------------------------------------------------------------
