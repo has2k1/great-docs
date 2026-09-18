@@ -79,8 +79,9 @@ SPEC = {
         },
     },
     "binary_files": {
-        # Seed the cache so the build resolves this source without network access.
-        f".great-docs-cache/interlinks/{_EXTDEMO_CACHE_NAME}": _EXTERNAL_INVENTORY,
+        # Seed the cache so the build resolves this source without network
+        # access. Docs-layout projects store it under `docs/.cache/`.
+        f"docs/.cache/interlinks/{_EXTDEMO_CACHE_NAME}": _EXTERNAL_INVENTORY,
     },
     "files": {
         "gdtest_interlinks/__init__.py": '''\
