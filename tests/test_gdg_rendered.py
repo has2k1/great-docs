@@ -57,7 +57,12 @@ requires_bs4 = pytest.mark.skipif(not HAS_BS4, reason="beautifulsoup4 not instal
 
 def _site_dir(pkg_name: str) -> Path:
     """Return the _site/ directory for a rendered GDG package."""
-    return Layout.make(_RENDERED_DIR / pkg_name).site_dir
+    package_dir = _RENDERED_DIR / pkg_name
+    if not package_dir.is_dir():
+        # Keep absent-package lookups inside the fixture tree instead of
+        # allowing `Layout.make` to find the enclosing repository.
+        return package_dir / "great-docs" / "_site"
+    return Layout.make(package_dir).site_dir
 
 
 def _deployed_css(pkg_name: str) -> str:
@@ -3400,7 +3405,7 @@ def test_changelog_config_propagated():
     if not _has_rendered_site(pkg):
         pytest.skip(f"{pkg} not rendered")
 
-    gd_yml = _RENDERED_DIR / pkg / "great-docs.yml"
+    gd_yml = Layout.make(_RENDERED_DIR / pkg).config_path
     assert gd_yml.exists(), "great-docs.yml should exist"
 
     cfg = parse_yaml(gd_yml.read_text())
@@ -3484,7 +3489,7 @@ def test_config_ug_list_sections_in_yml():
     if not _has_rendered_site(pkg):
         pytest.skip(f"{pkg} not rendered")
 
-    gd_yml = _RENDERED_DIR / pkg / "great-docs.yml"
+    gd_yml = Layout.make(_RENDERED_DIR / pkg).config_path
     assert gd_yml.exists(), "great-docs.yml should exist"
 
     cfg = parse_yaml(gd_yml.read_text())
@@ -3718,7 +3723,7 @@ def test_ug_explicit_order_config_sections():
     if not _has_rendered_site(pkg):
         pytest.skip(f"{pkg} not rendered")
 
-    gd_yml = _RENDERED_DIR / pkg / "great-docs.yml"
+    gd_yml = Layout.make(_RENDERED_DIR / pkg).config_path
     assert gd_yml.exists(), "great-docs.yml should exist"
 
     cfg = parse_yaml(gd_yml.read_text())
@@ -5016,7 +5021,7 @@ def test_md_disabled_no_copy_page_script():
 def test_md_disabled_config_written():
     """gdtest_md_disabled: great-docs.yml has markdown_pages: false."""
     pkg = "gdtest_md_disabled"
-    gd_yml = _RENDERED_DIR / pkg / "great-docs.yml"
+    gd_yml = Layout.make(_RENDERED_DIR / pkg).config_path
     if not gd_yml.exists():
         pytest.skip("great-docs.yml not found")
 
@@ -5108,7 +5113,7 @@ def test_md_no_widget_no_copy_page_script():
 def test_md_no_widget_config_written():
     """gdtest_md_no_widget: great-docs.yml has markdown_pages dict form."""
     pkg = "gdtest_md_no_widget"
-    gd_yml = _RENDERED_DIR / pkg / "great-docs.yml"
+    gd_yml = Layout.make(_RENDERED_DIR / pkg).config_path
     if not gd_yml.exists():
         pytest.skip("great-docs.yml not found")
 

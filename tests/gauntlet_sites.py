@@ -71,9 +71,15 @@ def site_dir(rendered_dir: Path, name: str) -> Path:
     -------
     Path
         The package's `_site` directory, resolved from whichever layout the
-        package's `great-docs.yml` actually lives under.
+        package's `great-docs.yml` actually uses. An unbuilt package uses the
+        root-layout default inside `rendered_dir`.
     """
-    return Layout.make(rendered_dir / name).site_dir
+    package_dir = rendered_dir / name
+    if not package_dir.is_dir():
+        # Do not let `Layout.make` search above the fixture root for an absent
+        # package; use the root-layout default inside the fixture tree.
+        return package_dir / "great-docs" / "_site"
+    return Layout.make(package_dir).site_dir
 
 
 def sentinel_path(rendered_dir: Path, name: str) -> Path:
