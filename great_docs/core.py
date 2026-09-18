@@ -6076,12 +6076,14 @@ class GreatDocs:
 
     def _resolve_code_include_path(self, file_path_str: str, source_dir: Path) -> Path | None:
         """
-        Resolve a code-include file path.
+        Resolve a code-include path against the page, source, and project roots
 
-        Tries *source_dir* first, then the project root.
+        The lookup checks the page directory, documentation source directory, and
+        project root in that order.
         """
         candidates = [
             source_dir / file_path_str,
+            self.layout.source_dir / file_path_str,
             self.layout.package_root / file_path_str,
         ]
         for candidate in candidates:
