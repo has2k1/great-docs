@@ -6082,7 +6082,7 @@ class GreatDocs:
         """
         candidates = [
             source_dir / file_path_str,
-            self.layout.source_dir / file_path_str,
+            self.layout.package_root / file_path_str,
         ]
         for candidate in candidates:
             resolved = candidate.resolve()
