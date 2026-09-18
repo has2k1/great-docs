@@ -59,7 +59,7 @@ SPEC = {
               --gdtest-custom-css: applied;
             }
         """,
-        "user_guide/01-page.qmd": """\
+        "docs/user_guide/01-page.qmd": """\
             ---
             title: Page
             ---

@@ -94,7 +94,7 @@ SPEC = {
             </style>
         """,
         # A page citing both entries; no per-page frontmatter.
-        "user_guide/01-citations.qmd": """\
+        "docs/user_guide/01-citations.qmd": """\
             ---
             title: Numbered Citations
             ---
