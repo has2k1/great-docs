@@ -8,6 +8,7 @@ minimal GDG test package.
 
 from __future__ import annotations
 
+import shutil
 import textwrap
 from pathlib import Path
 from typing import Any
@@ -69,6 +70,17 @@ def generate_package(
         file_path = pkg_dir / rel_path
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_bytes(blob)
+
+    # --- Move conventional documentation entries under docs/ -------------
+    # A docs-layout project keeps these entries under `docs/`, where
+    # `great_docs.core` resolves them by default. Specs define them relative
+    # to the package root for readability, so move them here after writing.
+    docs_dir = pkg_dir / "docs"
+    for conventional_name in ("user_guide", "user-guide", "assets", "notebooks"):
+        source = pkg_dir / conventional_name
+        if source.is_dir():
+            docs_dir.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(source), str(docs_dir / conventional_name))
 
     # --- docs/great-docs.yml (config) ------------------------------------
     config_path = pkg_dir / "docs" / "great-docs.yml"

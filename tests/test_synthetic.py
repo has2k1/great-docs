@@ -359,7 +359,9 @@ def test_L2_user_guide_detection(pkg_name: str, tmp_path: Path):
     if "has_user_guide" not in expected:
         pytest.skip("No 'has_user_guide' in spec")
 
-    has_guide = (pkg_dir / "user_guide").is_dir() or (pkg_dir / "user-guide").is_dir()
+    has_guide = (pkg_dir / "docs" / "user_guide").is_dir() or (
+        pkg_dir / "docs" / "user-guide"
+    ).is_dir()
 
     assert has_guide == expected["has_user_guide"], (
         f"Expected has_user_guide={expected['has_user_guide']}, "
@@ -375,9 +377,9 @@ def test_L2_user_guide_files(pkg_name: str, tmp_path: Path):
     if "user_guide_files" not in expected:
         pytest.skip("No 'user_guide_files' in spec")
 
-    guide_dir = pkg_dir / "user_guide"
+    guide_dir = pkg_dir / "docs" / "user_guide"
     if not guide_dir.exists():
-        guide_dir = pkg_dir / "user-guide"
+        guide_dir = pkg_dir / "docs" / "user-guide"
 
     assert guide_dir.exists(), "No user guide directory found"
 
@@ -421,7 +423,7 @@ def test_L2_supporting_pages(pkg_name: str, tmp_path: Path):
 
     if "has_assets" in expected:
         performed = True
-        assert (pkg_dir / "assets").is_dir() == expected["has_assets"]
+        assert (pkg_dir / "docs" / "assets").is_dir() == expected["has_assets"]
 
     if not performed:
         pytest.skip("No supporting page expectations in spec")
@@ -942,7 +944,11 @@ def _setup_blended_homepage(pkg_dir: Path, spec: dict) -> GreatDocs:
         existing.update(spec["config"])
         with open(config_path, "w", encoding="utf-8") as f:
             write_yaml(existing, f)
-        docs._config = Config(docs._find_package_root())
+        docs._config = Config(
+            docs.layout.package_root,
+            config_path=docs.layout.config_path,
+            cache_dir=docs.layout.cache_dir,
+        )
 
     docs._prepare_build_directory()
     docs._process_user_guide()
@@ -1150,6 +1156,7 @@ def test_L3_code_include_expansion(tmp_path: Path):
     """gdtest_code_include: include shortcodes for code files are expanded in user guide."""
     pkg_dir, spec = _make_package("gdtest_code_include", tmp_path)
     docs = GreatDocs(project_path=str(pkg_dir))
+    docs.install(force=True)
     docs._prepare_build_directory()
 
     ug_info = docs._discover_user_guide()
