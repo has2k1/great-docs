@@ -71,7 +71,7 @@ SPEC = {
     # ── great-docs.yml ────────────────────────────────────────────────
     "config": {
         "site": {
-            "css": ["docs/custom.css"],
+            "css": ["custom.css"],
         },
     },
     # ── Expected outcomes ─────────────────────────────────────────────

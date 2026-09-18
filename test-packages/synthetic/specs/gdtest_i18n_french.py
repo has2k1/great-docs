@@ -45,7 +45,7 @@ SPEC = {
         "funding": {"name": "Fondation pour la Recherche"},
         # Project-level bibliography; the auto-generated references heading must
         # be localized to French ("R\u00e9f\u00e9rences") via reference-section-title.
-        "bibliography": "docs/references.bib",
+        "bibliography": "references.bib",
     },
     "files": {
         "gdtest_i18n_french/__init__.py": '''\

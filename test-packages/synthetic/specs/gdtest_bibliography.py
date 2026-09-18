@@ -178,7 +178,7 @@ SPEC = {
     },
     # ── great-docs.yml ────────────────────────────────────────────────
     "config": {
-        "bibliography": "docs/references.bib",
+        "bibliography": "references.bib",
     },
     # ── Expected outcomes ─────────────────────────────────────────────
     "expected": {

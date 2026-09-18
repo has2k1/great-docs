@@ -30,7 +30,7 @@ SPEC = {
         # title-derived slug ("Examples" -> "examples"). The build copies it to
         # great-docs/docs/examples/, which is where tag scanning must look.
         "sections": [
-            {"title": "Examples", "dir": "docs/examples"},
+            {"title": "Examples", "dir": "examples"},
         ],
         "tags": {
             "enabled": True,
