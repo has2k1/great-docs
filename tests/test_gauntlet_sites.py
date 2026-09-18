@@ -393,13 +393,15 @@ def test_site_dir_of_an_unbuilt_package_stays_under_the_rendered_root(tmp_path: 
     Keep an absent package lookup inside the rendered fixture root
 
     An unguarded `Layout.make` call searches upwards for a project manifest and
-    can return the enclosing repository's site directory instead.
+    can return the enclosing repository's site or configuration instead.
+    Guard both lookups so missing packages remain inside the fixture tree.
     """
-    from tests.test_gdg_rendered import _site_dir
+    from tests.test_gdg_rendered import _config_path, _site_dir
 
     resolved = site_dir(tmp_path, "gdtest_never_built_xyz")
     assert resolved.is_relative_to(tmp_path)
     assert _site_dir("gdtest_never_built_xyz").is_relative_to(RENDERED_DIR)
+    assert not _config_path("gdtest_never_built_xyz").exists()
 
 
 @requires_quarto
