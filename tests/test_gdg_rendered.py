@@ -11200,8 +11200,7 @@ def test_DED_bibliography_file_copied_into_build_dir():
     pkg = _BIBLIOGRAPHY_PKG
     if not _has_rendered_site(pkg):
         pytest.skip(f"{pkg} not rendered")
-    # _site_dir(pkg).parent is the great-docs/ build directory.
-    build_dir = _site_dir(pkg).parent
+    build_dir = Layout.make(_RENDERED_DIR / pkg).build_dir
     assert (build_dir / "references.bib").exists(), (
         "references.bib should be copied into the build directory by basename"
     )
@@ -11215,7 +11214,7 @@ def test_DED_bibliography_wired_into_quarto_yml():
         pytest.skip(f"{pkg} not rendered")
     from yaml12 import read_yaml
 
-    quarto_yml = _site_dir(pkg).parent / "_quarto.yml"
+    quarto_yml = Layout.make(_RENDERED_DIR / pkg).build_dir / "_quarto.yml"
     assert quarto_yml.exists(), "_quarto.yml should exist in the build directory"
     with open(quarto_yml, encoding="utf-8") as f:
         config = read_yaml(f)
@@ -11445,7 +11444,7 @@ def test_DED_bibliography_csl_file_copied_and_wired():
         pytest.skip(f"{pkg} not rendered")
     from yaml12 import read_yaml
 
-    build_dir = _site_dir(pkg).parent
+    build_dir = Layout.make(_RENDERED_DIR / pkg).build_dir
     assert (build_dir / "numeric.csl").exists(), (
         "the .csl file should be copied into the build directory by basename"
     )
