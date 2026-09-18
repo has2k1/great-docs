@@ -26,9 +26,8 @@ SPEC = {
     },
     "config": {
         "display_name": "Nested Section Tags Demo",
-        # The section dir is nested and intentionally differs from the
-        # title-derived slug ("Examples" -> "examples"). The build copies it to
-        # great-docs/docs/examples/, which is where tag scanning must look.
+        # Resolve `dir` from the documentation source directory. Tag scanning
+        # must inspect the resulting `docs/examples/` path.
         "sections": [
             {"title": "Examples", "dir": "examples"},
         ],
