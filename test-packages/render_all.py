@@ -65,6 +65,8 @@ from catalog import (
 )
 from synthetic.generator import generate_package
 
+from great_docs._layout import Layout
+
 # ── Constants ────────────────────────────────────────────────────────────────
 
 RENDERED_DIR = _THIS_DIR / "_rendered"
@@ -154,6 +156,7 @@ def _compute_coverage(name: str) -> dict[str, bool]:
     Returns a dict mapping each coverage level to True/False.
     """
     result = {level: False for level in _COVERAGE_LEVELS}
+    site = Layout.make(RENDERED_DIR / name).site_dir
 
     try:
         spec = get_spec(name)
@@ -207,17 +210,17 @@ def _compute_coverage(name: str) -> dict[str, bool]:
         result["ret"] = True
 
     # Sidebar check
-    ref = RENDERED_DIR / name / "great-docs" / "_site" / "reference"
+    ref = site / "reference"
     if ref.exists() and any(f.name != "index.html" for f in ref.glob("*.html")):
         result["sbar"] = True
 
     # Heading check — applies to all rendered packages with reference pages
-    ref_exists = (RENDERED_DIR / name / "great-docs" / "_site" / "reference").exists()
+    ref_exists = ref.exists()
     if ref_exists:
         result["hdg"] = True
 
     # Navbar, meta, and a11y — apply to all packages with an index.html
-    site_index = RENDERED_DIR / name / "great-docs" / "_site" / "index.html"
+    site_index = site / "index.html"
     if site_index.exists():
         result["nav"] = True
         result["meta"] = True
@@ -308,7 +311,6 @@ def build_package(name: str) -> dict:
     """
     spec = get_spec(name)
     pkg_build_dir = RENDERED_DIR / name
-    site_dir = pkg_build_dir / "great-docs" / "_site"
 
     _common: dict = {
         "name": name,
@@ -347,6 +349,8 @@ def build_package(name: str) -> dict:
             encoding="utf-8",
         )
 
+    site_dir = Layout.make(pkg_dir).site_dir
+
     # Add to sys.path for griffe
     if str(pkg_dir) not in sys.path:
         sys.path.insert(0, str(pkg_dir))
@@ -383,7 +387,9 @@ def build_package(name: str) -> dict:
         # provide their own config already have it written by
         # generate_package).  Running init on a pre-configured package
         # would overwrite the spec's custom settings.
-        has_config = (pkg_dir / "great-docs.yml").exists()
+        has_config = (pkg_dir / "great-docs.yml").exists() or (
+            pkg_dir / "docs" / "great-docs.yml"
+        ).exists()
 
         if not has_config:
             log_lines.append("\n--- great-docs init ---")
@@ -443,7 +449,7 @@ def build_package(name: str) -> dict:
         # inject directly into the final HTML output.
         # ----------------------------------------------------------
         site_index = site_dir / "index.html"
-        gd_yml = pkg_dir / "great-docs.yml"
+        gd_yml = Layout.make(pkg_dir).config_path
         if site_index.exists():
             extras: list[str] = []
 
@@ -2092,7 +2098,7 @@ def _create_detail_page(r: dict, results: list[dict]) -> str:
         spec = get_spec(name)
         file_tree_html = _build_file_tree_html(
             spec,
-            config_path=RENDERED_DIR / name / "great-docs.yml",
+            config_path=Layout.make(RENDERED_DIR / name).config_path,
         )
         is_init_pkg = not bool(spec.get("config"))
     except Exception:
@@ -2831,7 +2837,7 @@ def serve(port: int = PORT) -> None:
 def _result_from_state(name: str, pkg_state: dict) -> dict:
     """Reconstruct a result dict from persisted state + catalog data."""
     spec = get_spec(name)
-    site_dir = RENDERED_DIR / name / "great-docs" / "_site"
+    site_dir = Layout.make(RENDERED_DIR / name).site_dir
     status = pkg_state.get("status", "unknown")
     result: dict = {
         "name": name,
