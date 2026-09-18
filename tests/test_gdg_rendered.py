@@ -29,6 +29,8 @@ from pathlib import Path
 
 import pytest
 
+from great_docs._layout import Layout
+
 # ── Setup ────────────────────────────────────────────────────────────────────
 
 _TEST_PACKAGES_DIR = Path(__file__).resolve().parent.parent / "test-packages"
@@ -55,7 +57,7 @@ requires_bs4 = pytest.mark.skipif(not HAS_BS4, reason="beautifulsoup4 not instal
 
 def _site_dir(pkg_name: str) -> Path:
     """Return the _site/ directory for a rendered GDG package."""
-    return _RENDERED_DIR / pkg_name / "great-docs" / "_site"
+    return Layout.make(_RENDERED_DIR / pkg_name).site_dir
 
 
 def _deployed_css(pkg_name: str) -> str:
@@ -781,7 +783,7 @@ def test_subtitle_only_section_heading_in_llms_outputs():
     `format_label` entry must appear below that heading, not below the preceding
     Utilities heading, in `llms.txt`, `llms-full.txt` and `skill.md`.
     """
-    site = _RENDERED_DIR / "gdtest_ref_sectioned" / "great-docs" / "_site"
+    site = _site_dir("gdtest_ref_sectioned")
     llms_txt = site / "llms.txt"
     llms_full = site / "llms-full.txt"
     skill_md = site / "skill.md"
@@ -2065,7 +2067,7 @@ def test_logo_replaces_title():
     )
 
     # Logo files should exist in the build directory
-    build_dir = _RENDERED_DIR / pkg / "great-docs"
+    build_dir = Layout.make(_RENDERED_DIR / pkg).build_dir
     assert (build_dir / "logo.svg").exists(), "logo.svg should be copied to build dir"
     assert (build_dir / "logo-dark.svg").exists(), "logo-dark.svg should be copied to build dir"
 
@@ -2381,7 +2383,7 @@ def test_cli_sidebar_structure_flat():
 
     from yaml12 import parse_yaml, read_yaml
 
-    quarto_yml = _RENDERED_DIR / pkg / "great-docs" / "_quarto.yml"
+    quarto_yml = Layout.make(_RENDERED_DIR / pkg).build_dir / "_quarto.yml"
     with open(quarto_yml) as f:
         config = read_yaml(f)
 
@@ -2408,7 +2410,7 @@ def test_cli_sidebar_structure_nested():
 
     from yaml12 import parse_yaml, read_yaml
 
-    quarto_yml = _RENDERED_DIR / pkg / "great-docs" / "_quarto.yml"
+    quarto_yml = Layout.make(_RENDERED_DIR / pkg).build_dir / "_quarto.yml"
     with open(quarto_yml) as f:
         config = read_yaml(f)
 
@@ -2473,7 +2475,7 @@ def test_cli_sidebar_no_raw_qmd_paths_in_nested():
 
     from yaml12 import parse_yaml, read_yaml
 
-    quarto_yml = _RENDERED_DIR / pkg / "great-docs" / "_quarto.yml"
+    quarto_yml = Layout.make(_RENDERED_DIR / pkg).build_dir / "_quarto.yml"
     with open(quarto_yml) as f:
         config = read_yaml(f)
 
