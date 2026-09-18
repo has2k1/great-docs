@@ -2967,7 +2967,7 @@ def _load_quarto_yml(pkg_name: str) -> dict:
     """Load and parse the _quarto.yml for a rendered package."""
     from yaml12 import parse_yaml, read_yaml
 
-    qpath = _RENDERED_DIR / pkg_name / "great-docs" / "_quarto.yml"
+    qpath = Layout.make(_RENDERED_DIR / pkg_name).build_dir / "_quarto.yml"
     with open(qpath) as f:
         return read_yaml(f)
 
@@ -3029,7 +3029,7 @@ def test_source_disabled_no_links_file():
     if not _has_rendered_site(pkg):
         pytest.skip(f"{pkg} not rendered")
 
-    source_links = _RENDERED_DIR / pkg / "great-docs" / "_source_links.json"
+    source_links = Layout.make(_RENDERED_DIR / pkg).build_dir / "_source_links.json"
     assert not source_links.exists(), (
         f"_source_links.json should not exist when source is disabled: {source_links}"
     )
@@ -3466,7 +3466,7 @@ def test_config_combo_b_opt_out_flags():
     )
 
     # source.enabled=false → no _source_links.json
-    source_links = _RENDERED_DIR / pkg / "great-docs" / "_source_links.json"
+    source_links = Layout.make(_RENDERED_DIR / pkg).build_dir / "_source_links.json"
     assert not source_links.exists(), "_source_links.json should not exist when source is disabled"
 
 
@@ -5030,7 +5030,7 @@ def test_md_disabled_config_written():
 def test_md_disabled_gd_options():
     """gdtest_md_disabled: _gd_options.json has markdown_pages: false."""
     pkg = "gdtest_md_disabled"
-    opts_path = _RENDERED_DIR / pkg / "great-docs" / "_gd_options.json"
+    opts_path = Layout.make(_RENDERED_DIR / pkg).build_dir / "_gd_options.json"
     if not opts_path.exists():
         pytest.skip("_gd_options.json not found")
 
@@ -5127,7 +5127,7 @@ def test_md_no_widget_gd_options():
     so markdown_pages should be true in the options file.
     """
     pkg = "gdtest_md_no_widget"
-    opts_path = _RENDERED_DIR / pkg / "great-docs" / "_gd_options.json"
+    opts_path = Layout.make(_RENDERED_DIR / pkg).build_dir / "_gd_options.json"
     if not opts_path.exists():
         pytest.skip("_gd_options.json not found")
 
@@ -5849,7 +5849,7 @@ def test_DED_config_minimal_source_disabled():
     if not _has_rendered_site(pkg):
         pytest.skip(f"{pkg} not rendered")
 
-    source_links = _RENDERED_DIR / pkg / "great-docs" / "_source_links.json"
+    source_links = Layout.make(_RENDERED_DIR / pkg).build_dir / "_source_links.json"
     assert not source_links.exists(), "_source_links.json should not exist when source disabled"
 
 
@@ -5913,7 +5913,7 @@ def test_DED_source_branch_no_links():
     if not _has_rendered_site(pkg):
         pytest.skip(f"{pkg} not rendered")
 
-    source_links = _RENDERED_DIR / pkg / "great-docs" / "_source_links.json"
+    source_links = Layout.make(_RENDERED_DIR / pkg).build_dir / "_source_links.json"
     # Synthetic packages don't have a real repo, so _source_links.json may not exist
     ref = _ref_dir(pkg)
     assert (ref / "read_data.html").exists(), "read_data page missing"
@@ -7196,7 +7196,7 @@ _INDEX_FM_PKG = "gdtest_index_frontmatter"
 
 def _generated_index_qmd(pkg: str) -> Path:
     """Return the homepage index.qmd that Great Docs generated for *pkg*."""
-    return _RENDERED_DIR / pkg / "great-docs" / "index.qmd"
+    return Layout.make(_RENDERED_DIR / pkg).build_dir / "index.qmd"
 
 
 @pytest.mark.dedicated
@@ -8517,7 +8517,7 @@ def test_DED_tag_location_tags_json_has_default_location():
 
     import json
 
-    tags_json = _RENDERED_DIR / _TAG_LOC_PKG / "great-docs" / "_tags.json"
+    tags_json = Layout.make(_RENDERED_DIR / _TAG_LOC_PKG).build_dir / "_tags.json"
     assert tags_json.exists(), "_tags.json not generated"
     data = json.loads(tags_json.read_text(encoding="utf-8"))
     assert data["default_location"] == "bottom", "Global default_location should be 'bottom'"
@@ -8532,7 +8532,7 @@ def test_DED_tag_location_tags_json_has_page_overrides():
 
     import json
 
-    tags_json = _RENDERED_DIR / _TAG_LOC_PKG / "great-docs" / "_tags.json"
+    tags_json = Layout.make(_RENDERED_DIR / _TAG_LOC_PKG).build_dir / "_tags.json"
     data = json.loads(tags_json.read_text(encoding="utf-8"))
     locs = data.get("page_tag_locations", {})
 
@@ -8965,7 +8965,7 @@ def test_HOMEPAGE_SUBDIRS_section_asset_dirs_copied():
     if not _has_rendered_site(_HOMEPAGE_UG_SUBDIRS_PKG):
         pytest.skip(f"{_HOMEPAGE_UG_SUBDIRS_PKG} not rendered")
 
-    build_dir = _RENDERED_DIR / _HOMEPAGE_UG_SUBDIRS_PKG / "great-docs"
+    build_dir = Layout.make(_RENDERED_DIR / _HOMEPAGE_UG_SUBDIRS_PKG).build_dir
 
     # Asset directories should exist in the build dir
     assert (build_dir / "examples" / "data").is_dir(), (
@@ -11621,7 +11621,7 @@ def test_DED_ref_section_order_cli_first():
     if not _has_rendered_site(pkg):
         pytest.skip(f"{pkg} not rendered")
 
-    quarto_yml = _RENDERED_DIR / pkg / "great-docs" / "_quarto.yml"
+    quarto_yml = Layout.make(_RENDERED_DIR / pkg).build_dir / "_quarto.yml"
     assert quarto_yml.exists(), "_quarto.yml missing"
     content = quarto_yml.read_text(encoding="utf-8")
     assert "data-gd-ref-sections','cli,api'" in content, (
@@ -11636,7 +11636,7 @@ def test_DED_ref_section_order_navbar_links_to_first_section():
     if not _has_rendered_site(pkg):
         pytest.skip(f"{pkg} not rendered")
 
-    quarto_yml = _RENDERED_DIR / pkg / "great-docs" / "_quarto.yml"
+    quarto_yml = Layout.make(_RENDERED_DIR / pkg).build_dir / "_quarto.yml"
     assert quarto_yml.exists(), "_quarto.yml missing"
     content = quarto_yml.read_text(encoding="utf-8")
     assert "href: reference/cli/index.qmd" in content, (
