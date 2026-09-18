@@ -150,13 +150,34 @@ def _count_dedicated_tests(name: str) -> int:
     return _DEDICATED_COUNTS.get(name, 0)
 
 
+def _package_layout(package_dir: Path) -> Layout:
+    """Resolve a Gauntlet package's layout within the fixture tree.
+
+    `Layout.make` searches upwards for a project manifest. Use root-layout
+    defaults when the package has not been generated, so the lookup remains
+    inside the fixture tree.
+    """
+    if package_dir.is_dir():
+        return Layout.make(package_dir)
+    build_dir = package_dir / "great-docs"
+    return Layout(
+        package_root=package_dir,
+        config_path=package_dir / "great-docs.yml",
+        source_dir=package_dir,
+        build_dir=build_dir,
+        site_dir=build_dir / "_site",
+        freeze_dir=package_dir / "_freeze",
+        cache_dir=package_dir / ".great-docs-cache",
+    )
+
+
 def _compute_coverage(name: str) -> dict[str, bool]:
     """Compute test coverage levels for a single package.
 
     Returns a dict mapping each coverage level to True/False.
     """
     result = {level: False for level in _COVERAGE_LEVELS}
-    site = Layout.make(RENDERED_DIR / name).site_dir
+    site = _package_layout(RENDERED_DIR / name).site_dir
 
     try:
         spec = get_spec(name)
@@ -349,7 +370,8 @@ def build_package(name: str) -> dict:
             encoding="utf-8",
         )
 
-    site_dir = Layout.make(pkg_dir).site_dir
+    layout = _package_layout(pkg_dir)
+    site_dir = layout.site_dir
 
     # Add to sys.path for griffe
     if str(pkg_dir) not in sys.path:
@@ -387,9 +409,7 @@ def build_package(name: str) -> dict:
         # provide their own config already have it written by
         # generate_package).  Running init on a pre-configured package
         # would overwrite the spec's custom settings.
-        has_config = (pkg_dir / "great-docs.yml").exists() or (
-            pkg_dir / "docs" / "great-docs.yml"
-        ).exists()
+        has_config = layout.config_path.exists()
 
         if not has_config:
             log_lines.append("\n--- great-docs init ---")
@@ -449,7 +469,7 @@ def build_package(name: str) -> dict:
         # inject directly into the final HTML output.
         # ----------------------------------------------------------
         site_index = site_dir / "index.html"
-        gd_yml = Layout.make(pkg_dir).config_path
+        gd_yml = layout.config_path
         if site_index.exists():
             extras: list[str] = []
 
@@ -2098,7 +2118,7 @@ def _create_detail_page(r: dict, results: list[dict]) -> str:
         spec = get_spec(name)
         file_tree_html = _build_file_tree_html(
             spec,
-            config_path=Layout.make(RENDERED_DIR / name).config_path,
+            config_path=_package_layout(RENDERED_DIR / name).config_path,
         )
         is_init_pkg = not bool(spec.get("config"))
     except Exception:
@@ -2837,7 +2857,7 @@ def serve(port: int = PORT) -> None:
 def _result_from_state(name: str, pkg_state: dict) -> dict:
     """Reconstruct a result dict from persisted state + catalog data."""
     spec = get_spec(name)
-    site_dir = Layout.make(RENDERED_DIR / name).site_dir
+    site_dir = _package_layout(RENDERED_DIR / name).site_dir
     status = pkg_state.get("status", "unknown")
     result: dict = {
         "name": name,
