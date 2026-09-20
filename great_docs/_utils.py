@@ -88,14 +88,24 @@ QUARTO_YML_HEADER = (
     "# Configure settings in great-docs.yml instead.\n\n"
 )
 
+GITIGNORE_CONTENT = """# Great Docs build directory
+# This directory is ephemeral and regenerated on each build
+# Do not commit this directory to version control
+*
+!.gitignore
+"""
+
 
 def is_great_docs_build_dir(path: Path) -> bool:
     """
-    Identify a Great Docs-generated Quarto project directory
+    Identify a directory Great Docs generated and owns
 
-    The directory must contain a readable UTF-8 `_quarto.yml` that begins with
-    the complete generated-file header. The exact match prevents build cleanup
-    from treating user directories as generated output.
+    A generated directory either contains a readable UTF-8 `_quarto.yml` that
+    begins with the complete generated-file header, or holds nothing but the
+    generated `.gitignore` a fresh clone leaves behind before the first
+    build (`.gitignore`'s own `!.gitignore` rule keeps it, and only it,
+    tracked by git). Either exact match prevents build cleanup from treating
+    a user directory as generated output.
 
     Parameters
     ----------
@@ -104,16 +114,28 @@ def is_great_docs_build_dir(path: Path) -> bool:
 
     Returns
     -------
-    Whether the directory contains a Great Docs-generated `_quarto.yml`.
+    Whether Great Docs generated this directory's contents.
     """
-    if path.is_symlink() or (path / "_quarto.yml").is_symlink():
+    if path.is_symlink():
+        return False
+    quarto_yml = path / "_quarto.yml"
+    if not quarto_yml.is_symlink():
+        try:
+            with quarto_yml.open(encoding="utf-8") as opened:
+                if opened.read(len(QUARTO_YML_HEADER)) == QUARTO_YML_HEADER:
+                    return True
+        except (OSError, UnicodeDecodeError):
+            pass
+    try:
+        entries = list(path.iterdir())
+    except OSError:
+        return False
+    if len(entries) != 1 or entries[0].name != ".gitignore" or entries[0].is_symlink():
         return False
     try:
-        with (path / "_quarto.yml").open(encoding="utf-8") as quarto_yml:
-            header = quarto_yml.read(len(QUARTO_YML_HEADER))
+        return entries[0].read_text(encoding="utf-8") == GITIGNORE_CONTENT
     except (OSError, UnicodeDecodeError):
         return False
-    return header == QUARTO_YML_HEADER
 
 
 def is_in_great_docs_build_dir(

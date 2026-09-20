@@ -18,6 +18,7 @@ from ._source_refs import source_reference_spans
 from ._subprocess import TEXT_MODE_KWARGS
 from ._typer_cli import is_cli_command, is_cli_group, param_kind, to_click_command
 from ._utils import (
+    GITIGNORE_CONTENT,
     QUARTO_YML_HEADER,
     is_great_docs_build_dir,
     recognised_build_dirs,
@@ -620,14 +621,8 @@ class GreatDocs:
                 shutil.copy2(marimo_css_src, self.build_dir / "marimo-islands.css")
 
         # Create .gitignore for the great-docs directory
-        gitignore_content = """# Great Docs build directory
-# This directory is ephemeral and regenerated on each build
-# Do not commit this directory to version control
-*
-!.gitignore
-"""
         gitignore_path = self.build_dir / ".gitignore"
-        gitignore_path.write_text(gitignore_content, encoding="utf-8")
+        gitignore_path.write_text(GITIGNORE_CONTENT, encoding="utf-8")
 
         # Note: User guide files are copied by _process_user_guide() during build
         # which handles stripping numeric prefixes for clean URLs
